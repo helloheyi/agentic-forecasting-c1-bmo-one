@@ -164,10 +164,20 @@ Not every method applies equally well to every dataset. The table below indicate
 
 ---
 
+## Long-Term Vision
+
+The bootcamp is Phase 1 of a broader initiative. The platform is designed from the outset to support two complementary purposes:
+
+* **Bootcamp learning platform** — a structured environment for participants to experiment with and compare forecasting methods against shared reference datasets, with backtesting, evaluation, and leaderboard infrastructure.
+* **Ongoing forecasting benchmark and competition** — an open platform where forecasting agents submit predictions against live questions, resolutions are published as they occur, and performance is tracked longitudinally across participants and methods.
+
+These purposes share the same evaluation infrastructure: the same interfaces for submitting predictions, resolving outcomes, and computing scores work in both backtesting and live modes. Building for both from the start avoids costly architectural rewrites later.
+
+---
+
 ## Out of Scope (Phase 1\)
 
 The following are documented here for continuity but are explicitly deferred beyond Phase 1:
 
-* **Live open benchmark** — an open science initiative requiring published code, shared reasoning traces, and logged forecasts. Under active consideration as a dedicated extension; not in scope for the bootcamp.  
-* **Self-adaptive agent research** (ALMA, ADAS/GEPA, LLM Processes evolution) — Phase 2 research agenda, documented separately in the full proposal.  
-* **Evolving Epistemic Ensembles / Coefficient Giving proposal** — stretch goal contingent on Phase 1 outcomes. (Note: we don't need to mention this anywhere in the context of the bootcamp.)
+* **Live open benchmark** — opening the platform to external participants as a public forecasting competition. The Phase 1 infrastructure is designed to support this; activation is deferred.
+* **Self-adaptive agent research** (ALMA, ADAS/GEPA, LLM Processes evolution) — Phase 2 research agenda, documented separately in the full proposal.
