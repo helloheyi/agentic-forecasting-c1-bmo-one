@@ -8,6 +8,7 @@ import pandas as pd
 
 from aieng.forecasting.data.adapters.base import BaseAdapter
 
+
 # Canonical column names in StatCan CSV exports (stable across tables).
 _STATCAN_DATE_COL = "REF_DATE"
 _STATCAN_VALUE_COL = "VALUE"
@@ -130,7 +131,7 @@ class StatCanAdapter(BaseAdapter):
         ValueError
             If a column named in ``member_filter`` is not present in the table.
         """
-        import stats_can.sc as _sc  # local import — optional dependency
+        import stats_can.sc as _sc  # noqa: PLC0415 — lazy import after package checks
 
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,9 +142,7 @@ class StatCanAdapter(BaseAdapter):
             try:
                 _sc.download_tables([normalized], path=self._cache_dir)
             except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to download StatCan table {self._table_id!r}: {exc}"
-                ) from exc
+                raise RuntimeError(f"Failed to download StatCan table {self._table_id!r}: {exc}") from exc
 
         try:
             raw = _read_zip(zip_path, normalized)
@@ -190,6 +189,4 @@ class StatCanAdapter(BaseAdapter):
 
         # Drop rows with missing values (StatCan uses blank VALUE for suppressed data).
         result = result.dropna(subset=["value"])
-        result = result.sort_values("timestamp").reset_index(drop=True)
-
-        return result
+        return result.sort_values("timestamp").reset_index(drop=True)

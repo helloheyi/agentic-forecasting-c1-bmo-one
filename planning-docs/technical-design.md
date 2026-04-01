@@ -51,6 +51,14 @@ Tests mirror the package under `aieng-forecasting/tests/aieng/forecasting/`.
 
 All prediction payloads and data interfaces use **Pydantic** models with mypy-compatible typing throughout.
 
+### Linting & pre-commit scope
+
+**Decision:** Strict **mypy** (`uv run mypy -p aieng`) applies only to the installable **`aieng`** package under `aieng-forecasting/aieng/`. Root **`scripts/`** and **`implementations/`** are not typechecked as application entrypoints. The **`.pre-commit-config.yaml`** (used by **`uv run pre-commit run`** and by **CI**) runs mypy via **`uv run`** so it matches `make lint` and the project venv.
+
+**Ruff** in that config applies to Python and notebooks repo-wide, but **`scripts/**`** and **`implementations/**`** use **per-file ignores** in the root `pyproject.toml` for patterns common in one-off scripts (e.g. `sys.path` before imports, lighter docstring rules). **`check-docstring-first`** is skipped for `scripts/` and `implementations/` in the pre-commit config for the same reason.
+
+**Git commit does not run pre-commit locally** — hooks are not installed on `git commit` so contributors are not blocked or surprised by stash behavior. **CI** still runs `pre-commit run --all-files` on pushes/PRs to `main`. **pre-commit.ci** skips the mypy hook in that config because the hosted image may not mirror every contributor’s uv layout; GitHub Actions uses `uv sync` and runs the full suite.
+
 ---
 
 ## Evaluation Architecture

@@ -20,8 +20,8 @@ The project charter — the agreement between Ethan and the project management o
 ### Data cache
 Historical data is stored in `data/` at the repo root (gitignored). Before running notebooks or scripts that depend on live data, populate the cache by running the relevant script in `scripts/` (e.g. `uv run python scripts/fetch_cpi.py`). Never commit data files.
 
-### Pre-commit hooks
-The repo uses pre-commit. Key hooks: `ruff` (lint + format), `mypy` (type checking, excludes tests), `nbstripout` (strips notebook outputs before commit). Run `uv run pre-commit run --all-files` to check everything manually. Notebook outputs are intentionally not committed — they are stripped automatically.
+### Code quality (not on commit)
+Git commits **do not** run automated hooks locally. Run **`make dev lint`** (Black, isort, mypy on `aieng`) before pushing, or **`uv run pre-commit run --all-files`** to mirror CI (ruff, mypy, nbstripout, etc.). Notebook outputs are not committed to the repo — strip them with `nbstripout` or let `pre-commit run` do it when you run it manually. CI on `main` runs the same `pre-commit` config.
 
 ### Test philosophy
 Tests should justify their existence. Write tests for: non-obvious logic that is easy to get wrong, defensive contracts (e.g. copy-on-return), and error paths where the message matters. Do not write tests for: Pydantic model construction (Pydantic already validates this), trivial Python behaviour (sorted lists, empty dicts), or mock-interaction assertions that test implementation rather than behaviour. When in doubt, fewer focused tests are better than many shallow ones.

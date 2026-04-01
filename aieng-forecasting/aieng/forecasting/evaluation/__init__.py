@@ -2,4 +2,5 @@
 
 from aieng.forecasting.evaluation.task import ForecastingTask
 
+
 __all__ = ["ForecastingTask"]

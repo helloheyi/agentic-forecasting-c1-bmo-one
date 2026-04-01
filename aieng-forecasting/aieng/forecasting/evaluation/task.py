@@ -72,6 +72,6 @@ class ForecastingTask(BaseModel):
     resolution_fn: str = Field(
         default="observed_value_at_resolution_timestamp",
         description=(
-            "How ground truth is determined. Default resolves to the observed series value " "at the target timestamp."
+            "How ground truth is determined. Default resolves to the observed series value at the target timestamp."
         ),
     )

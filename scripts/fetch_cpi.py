@@ -18,6 +18,12 @@ Output
 ------
 Prints a summary table of all registered series (series_id, date range,
 number of observations).
+
+Notes
+-----
+TODO: Consider generalizing this script for more flexible, user-friendly discovery. The StatCan
+adapter is flexible, but callers must know the table id and member filters for the series they
+want. We could add examples for a few different tables.
 """
 
 from __future__ import annotations
@@ -25,11 +31,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+
 # Ensure the workspace root is on sys.path when run directly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aieng.forecasting.data import DataService, SeriesMetadata
 from aieng.forecasting.data.adapters import StatCanAdapter
+
 
 # Statistics Canada table containing Canada-wide CPI by product group.
 # Table 18-10-0004-13: Consumer Price Index by product group, monthly,

@@ -6,6 +6,9 @@ repos:
     - id: check-ast
     - id: check-builtin-literals
     - id: check-docstring-first
+      # One-off scripts and exploration code often use docstrings + comments differently
+      # than library modules; keep this check for packages under aieng-forecasting/aieng/.
+      exclude: ^(scripts|implementations)/
     - id: check-executables-have-shebangs
     - id: debug-statements
     - id: end-of-file-fixer
@@ -29,18 +32,21 @@ repos:
     hooks:
     - id: ruff
       args: [--fix, --exit-non-zero-on-fix]
+      # Library + tests: strict. Scripts/notebooks: rules relaxed via pyproject per-file-ignores.
       types_or: [python, jupyter]
     - id: ruff-format
       types_or: [python, jupyter]
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  # Typecheck only the installed aieng package (same as `make lint`). Uses the project venv via uv;
+  # system `python3 -m mypy` does not see mypy and is wrong for this repo.
+  - repo: local
     hooks:
-    - id: mypy
-      entry: python3 -m mypy --config-file pyproject.toml
-      language: system
-      types: [python]
-      exclude: "tests"
+      - id: mypy-aieng
+        name: mypy (aieng package)
+        entry: uv run mypy -p aieng
+        language: system
+        pass_filenames: false
+        files: ^(aieng-forecasting/aieng/|pyproject\.toml|aieng-forecasting/pyproject\.toml)
 
   - repo: https://github.com/kynan/nbstripout
     rev: 0.9.1
@@ -62,5 +68,5 @@ ci:
     autoupdate_branch: ''
     autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
     autoupdate_schedule: weekly
-    skip: [mypy]
+    skip: [mypy-aieng]
     submodules: false
