@@ -1,3 +1,27 @@
+## Apr 1, 2026 — CPI series expansion and notebook update (session 7)
+
+### What we completed
+
+- **CPI series expanded from 9 → 47**: `scripts/fetch_cpi.py` now registers all product-group series visible at [table 18-10-0004-11](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1810000411). Table ID updated from `18-10-0004-13` to `18-10-0004-11` (both normalise to the same `18100004.zip` download; the suffix is a variant label). All 47 series register with 0 failures. Series span food sub-components, shelter sub-components, energy, transportation, clothing, health, recreation, alcohol/tobacco, and special aggregates (core, ex-gasoline, etc.).
+- **`cpi_data_exploration.ipynb` updated**: now selects 6 representative series — All-items, Core (ex-food & energy), Shelter, Food, Energy, Gasoline — and demos both a combined overlay plot and a small-multiples view. YoY change plot updated to show all 6 series together.
+- **Notebook outputs policy decided**: `nbstripout` removed from pre-commit config. Contributors control output stripping per-notebook. `technical-design.md` updated with this decision. Exploration notebooks like `cpi_data_exploration.ipynb` may commit outputs for readability.
+- **`fetch_statcan.ipynb` cleaned up**: hardcoded absolute `CACHE_DIR` path replaced with a relative path.
+
+### Current state
+
+- 47 Canada-wide CPI series loadable from StatCan table 18-10-0004-11
+- `cpi_data_exploration.ipynb` is a runnable demo of series selection and visualisation
+- Notebook output policy is explicit and documented
+
+### What's next (unchanged from session 6)
+
+1. **First baseline predictor** — naive/seasonal naive via Darts, forcing definition of `ContinuousForecast` and `Predictor` ABC.
+2. **Backtesting loop** — iterate over historical forecast origins, collect predictions, resolve, score with CRPS.
+3. **`released_at` for StatCan** — CPI is published ~3 weeks after the reference month; `released_at=None` introduces optimistic backtest bias.
+4. **Second data source** — FRED adapter.
+
+---
+
 ## Mar 31, 2026 — Bugfix, cleanup, and test review (session 6)
 
 ### What we completed

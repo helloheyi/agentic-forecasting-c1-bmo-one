@@ -48,11 +48,6 @@ repos:
         pass_filenames: false
         files: ^(aieng-forecasting/aieng/|pyproject\.toml|aieng-forecasting/pyproject\.toml)
 
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.9.1
-    hooks:
-    - id: nbstripout
-
   - repo: https://github.com/nbQA-dev/nbQA
     rev: 1.9.1
     hooks:

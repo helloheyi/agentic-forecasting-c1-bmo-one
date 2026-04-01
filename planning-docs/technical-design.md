@@ -59,6 +59,10 @@ All prediction payloads and data interfaces use **Pydantic** models with mypy-co
 
 **Git commit does not run pre-commit locally** — hooks are not installed on `git commit` so contributors are not blocked or surprised by stash behavior. **CI** still runs `pre-commit run --all-files` on pushes/PRs to `main`. **pre-commit.ci** skips the mypy hook in that config because the hosted image may not mirror every contributor’s uv layout; GitHub Actions uses `uv sync` and runs the full suite.
 
+### Notebook outputs
+
+**Decision (Apr 1, 2026):** Notebook outputs are **not** stripped automatically. `nbstripout` has been removed from the pre-commit config. Contributors decide per-notebook whether to commit outputs — exploration notebooks (e.g., `cpi_data_exploration.ipynb`) may include outputs to aid readability. The `nbqa-ruff` linter still runs on notebook source cells via pre-commit.
+
 ---
 
 ## Evaluation Architecture
@@ -140,7 +144,7 @@ No outbound calls for historical or resolution data occur during bootcamp sessio
 
 **Data cache location:** `data/` at the repo root, `.gitignore`'d. The `stats-can` library stores its table cache in `data/statcan/`. Run `scripts/fetch_cpi.py` (or equivalent per-source scripts in `scripts/`) before sessions.
 
-**Data loading scripts:** `scripts/` at the repo root. These are standalone scripts (not part of the installable package) that instantiate adapters and populate the local cache. One script per data source (e.g. `scripts/fetch_cpi.py`, `scripts/fetch_fred.py`).
+**Data loading scripts:** `scripts/` at the repo root. These are standalone scripts (not part of the installable package) that instantiate adapters and populate the local cache. One script per data source (e.g. `scripts/fetch_cpi.py`, `scripts/fetch_fred.py`). `fetch_cpi.py` registers all 47 Canada-wide product-group series from StatCan table `18-10-0004-11` (pid=1810000411).
 
 ### Architecture
 
