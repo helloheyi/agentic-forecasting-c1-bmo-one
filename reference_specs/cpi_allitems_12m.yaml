@@ -1,0 +1,38 @@
+# Reference BacktestSpec: CPI All-items Canada, 12-month ahead forecast
+#
+# Evaluates predictors twice per year (January and July origins) from 2000 to
+# present. Requires 24 months of history before the first forecast (warmup).
+#
+# To load this spec in Python:
+#
+#   import yaml
+#   from aieng.forecasting.evaluation import BacktestSpec
+#
+#   with open("reference_specs/cpi_allitems_12m.yaml") as f:
+#       spec = BacktestSpec.model_validate(yaml.safe_load(f))
+#
+# The target series must be registered in the DataService before running a
+# backtest. Use scripts/fetch_cpi.py to populate the local data cache, then
+# register "cpi_all_items_canada" from StatCan table 18-10-0004-11.
+
+task:
+  task_id: cpi_all_items_canada_12m
+  target_series_id: cpi_all_items_canada
+  horizon: 12
+  frequency: MS
+  description: >
+    Forecast Canada-wide CPI All-items (index, 2002=100) exactly 12 months
+    ahead of the forecast origin. Evaluated at January and July origins.
+    Ground truth is the observed StatCan CPI value at the resolution date.
+
+# Backtest window: January 2000 through January 2026.
+start: "2000-01-01"
+end: "2026-01-01"
+
+# stride=6 on monthly (MS) frequency gives January and July origins.
+stride: 6
+
+# Require 24 months of history before the first forecast. Effective first
+# forecast origin is January 2002 (series starts ~1995 but warmup from
+# the spec start means 2000-01-01 + 24 months = 2002-01-01).
+warmup: 24

@@ -74,10 +74,10 @@ class StatCanAdapter(BaseAdapter):
     -----
     **Information cutoff**: StatCan publishes CPI data roughly 3 weeks after
     the reference month. For example, January CPI is released in mid-February.
-    This adapter currently sets ``released_at = None``, which causes
-    ``CutoffEnforcer`` to fall back to ``timestamp`` (the reference month).
-    This is a slight optimistic bias in backtests. A future improvement would
-    populate ``released_at`` from StatCan's release schedule API.
+    This adapter populates ``released_at`` as ``timestamp + 21 days``, which
+    approximates this lag. A more precise implementation would query StatCan's
+    release calendar API, but the 21-day approximation removes the most
+    significant optimistic bias in backtests.
 
     Examples
     --------
@@ -90,7 +90,7 @@ class StatCanAdapter(BaseAdapter):
     ... )
     >>> df = adapter.fetch()
     >>> df.columns.tolist()
-    ['timestamp', 'value']
+    ['timestamp', 'value', 'released_at']
     """
 
     def __init__(
@@ -119,9 +119,11 @@ class StatCanAdapter(BaseAdapter):
         Returns
         -------
         pd.DataFrame
-            DataFrame with columns ``timestamp`` (datetime64[ns]) and ``value``
-            (float64), sorted ascending by ``timestamp``. Rows with missing
-            values are dropped.
+            DataFrame with columns ``timestamp`` (datetime64[ns]), ``value``
+            (float64), and ``released_at`` (datetime64[ns]), sorted ascending
+            by ``timestamp``. ``released_at`` is set to ``timestamp + 21 days``
+            to approximate StatCan's publication lag. Rows with missing values
+            are dropped.
 
         Raises
         ------
@@ -179,11 +181,15 @@ class StatCanAdapter(BaseAdapter):
                 f"Available columns: {filtered.columns.tolist()}"
             )
 
-        # Build canonical output: (timestamp, value).
+        # Build canonical output: (timestamp, value, released_at).
+        timestamps = pd.to_datetime(filtered[_STATCAN_DATE_COL])
         result = pd.DataFrame(
             {
-                "timestamp": pd.to_datetime(filtered[_STATCAN_DATE_COL]),
+                "timestamp": timestamps,
                 "value": pd.to_numeric(filtered[_STATCAN_VALUE_COL], errors="coerce"),
+                # Approximate StatCan's ~3-week publication lag. January CPI is
+                # published around February 21, so released_at = timestamp + 21d.
+                "released_at": timestamps + pd.DateOffset(days=21),
             }
         )
 

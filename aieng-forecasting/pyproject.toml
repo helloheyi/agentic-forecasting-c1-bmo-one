@@ -28,6 +28,8 @@ dependencies = [
     "stats-can>=3.1.0",
     "pandas>=2.0",
     "pydantic>=2.0",
+    "darts>=0.43.0",
+    "properscoring>=0.1",
 ]
 
 [tool.hatch.build.targets.sdist]

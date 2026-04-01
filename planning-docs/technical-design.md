@@ -36,9 +36,10 @@ The installable library package is named **`aieng-forecasting`**, located at `ai
 Structure:
 ```
 aieng-forecasting/aieng/forecasting/
-├── data/               # DataService, ForecastContext, SeriesStore, CutoffEnforcer, adapters
-│   └── adapters/       # BaseAdapter, StatCanAdapter, LocalCSVAdapter (future)
-└── evaluation/         # ForecastingTask, Predictor ABC, Prediction types (future)
+├── data/                   # DataService, ForecastContext, SeriesStore, CutoffEnforcer, adapters
+│   └── adapters/           # BaseAdapter, StatCanAdapter, LocalCSVAdapter (future)
+└── evaluation/             # ForecastingTask, Predictor ABC, Prediction types, backtest engine
+    └── predictors/         # ARIMAPredictor (reference baseline)
 ```
 
 Tests mirror the package under `aieng-forecasting/tests/aieng/forecasting/`.
@@ -224,10 +225,17 @@ Which series are meaningfully related (e.g., CPI sub-components, related equity 
 
 Two concrete payload types:
 
-- **`ContinuousForecast`** — point values + quantiles, for economic/time series tasks
-- **`BinaryForecast`** — probability estimate, for Metaculus-style discrete event questions
+- **`ContinuousForecast`** — point forecast + quantiles at standard levels (0.05…0.95), for economic/time series tasks. Designed to be YAML-serializable from day one.
+- **`BinaryForecast`** — probability estimate, for Metaculus-style discrete event questions. (Planned — Pass 2.)
 
 We follow existing standards rather than inventing new ones. For discrete event forecasting, we follow Metaculus conventions.
+
+**`ContinuousForecast` fields:**
+- `point_forecast: float` — central estimate (typically the median of the predictive distribution)
+- `quantiles: dict[float, float]` — standard quantile levels 0.05, 0.10, 0.20…0.90, 0.95; keys must be in (0, 1)
+
+**`Prediction` fields (metadata wrapper):**
+- `predictor_id`, `task_id`, `issued_at`, `as_of`, `forecast_date`, `payload: ContinuousForecast`
 
 ---
 
@@ -304,6 +312,14 @@ The `CutoffEnforcer` enforces a critical principle: **no model or agent may acce
 
 This is the unifying concept across both time series backtesting and discrete event evaluation, and is a core teaching objective of the bootcamp.
 
+### StatCan `released_at` approximation
+
+**Decision date:** Apr 2, 2026
+
+`StatCanAdapter.fetch()` populates `released_at = timestamp + 21 days` to approximate StatCan's ~3-week publication lag. For example, January CPI data (reference month 2023-01-01) is assigned `released_at = 2023-01-22`. This removes the most significant optimistic bias from backtests without requiring the full release calendar API.
+
+A more precise implementation (using StatCan's SDMX release schedule) is deferred.
+
 ### Open Questions
 
 - **Data service update pipeline**: How are updates handled as new data releases come in (e.g., monthly StatCan drops)? Important for the live benchmark extension; needs to be resolved before live evaluation infrastructure is built.
@@ -319,16 +335,18 @@ Shared abstractions are extracted after both passes are working — not designed
 1. **Pass 1 — Economic forecasting** (StatCan, continuous series, `ContinuousForecast` payloads)
 2. **Pass 2 — Metaculus predictions** (binary/categorical, discrete event, `BinaryForecast` payloads)
 
-### Phase 1 Build Sequence (Pass 1)
+### Phase 1 Build Sequence (Pass 1) — Status
 
-1. `ContinuousForecast` + `Prediction` Pydantic models — YAML-serializable, hashable
-2. `Predictor` ABC — `predict(task: ForecastingTask, context: ForecastContext) -> Prediction`
-3. Naive baseline predictor (last known value) via Darts — validates the interface end-to-end
-4. `BacktestSpec` + `BacktestResult` Pydantic models — interfaces before the loop
-5. `backtest()` function — the harness
-6. `released_at` fix for StatCan CPI — remove optimistic bias before interpreting results
-7. Reference spec YAML for CPI All-items task (`reference_specs/cpi_allitems.yaml`)
-8. End-to-end run: two predictor variants on CPI All-items, compare CRPS
+1. ✅ `ContinuousForecast` + `Prediction` Pydantic models — YAML-serializable
+2. ✅ `Predictor` ABC — `predict(task: ForecastingTask, context: ForecastContext) -> Prediction`
+3. ✅ `ARIMAPredictor` (Darts AutoARIMA, 500 Monte Carlo samples) — first reference predictor
+4. ✅ `BacktestSpec` + `BacktestResult` Pydantic models
+5. ✅ `backtest()` function — iterates origins, scores with CRPS via `properscoring`
+6. ✅ `released_at` fix for StatCan CPI (21-day approximation)
+7. ✅ Reference spec YAML (`reference_specs/cpi_allitems_12m.yaml`) — Jan/Jul origins, 2000–2026
+8. ✅ Demo notebook (`implementations/economic_forecasting/cpi_backtest_demo.ipynb`)
+
+**Next:** Second predictor variant for comparison, then Pass 2 (Metaculus / `BinaryForecast`).
 
 ### Long-Term Vision
 

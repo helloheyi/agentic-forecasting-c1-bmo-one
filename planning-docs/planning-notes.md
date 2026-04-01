@@ -1,3 +1,47 @@
+## Apr 2, 2026 (session 5) — CPI backtest end-to-end implementation
+
+### What we built
+
+Full Phase 1 evaluation layer — the repo now supports a complete, runnable backtest.
+
+**New evaluation layer** (`aieng/forecasting/evaluation/`):
+- `prediction.py` — `ContinuousForecast` (point + quantiles at 0.05…0.95), `Prediction` (metadata wrapper). Both YAML-serializable Pydantic models.
+- `predictor.py` — `Predictor` ABC with `predict(task, context) -> Prediction` and `predictor_id` property.
+- `backtest.py` — `BacktestSpec`, `BacktestResult`, `backtest()` function. Derives origins from spec, enforces warmup, resolves ground truth, scores with CRPS (`properscoring`).
+- `predictors/arima.py` — `ARIMAPredictor` using Darts `AutoARIMA`. Fits per-origin, generates 500 Monte Carlo samples, extracts quantiles at standard levels.
+
+**Data layer fix:**
+- `StatCanAdapter.fetch()` now populates `released_at = timestamp + 21 days` to approximate StatCan's publication lag. Removes the optimistic bias in backtests.
+
+**Reference spec:** `reference_specs/cpi_allitems_12m.yaml` — CPI All-items, 12-month horizon, January and July origins, 2000–2026, warmup=24.
+
+**Demo notebook:** `implementations/economic_forecasting/cpi_backtest_demo.ipynb` — 7-cell walkthrough from data registration through serialized result YAML.
+
+**New dependencies:** `darts==0.43.0`, `properscoring==0.1` (+ transitive: scipy, statsmodels, scikit-learn, numba, etc.).
+
+**Tests:** 51 total (was 32), all passing. `make lint` clean.
+
+### Confirmed full pipeline
+
+```python
+import yaml
+from aieng.forecasting.evaluation import ARIMAPredictor, BacktestSpec, backtest
+
+with open("reference_specs/cpi_allitems_12m.yaml") as f:
+    spec = BacktestSpec.model_validate(yaml.safe_load(f))
+
+results = backtest(predictor=ARIMAPredictor(), spec=spec, data_service=svc)
+print(f"Mean CRPS: {results.mean_crps:.4f}")
+```
+
+### What's next
+
+1. **Run the actual backtest** — execute `cpi_backtest_demo.ipynb` end-to-end, record the real mean CRPS as a baseline number.
+2. **Second predictor** — add a second variant (e.g., fixed-order ARIMA or a seasonal naive via Darts) to make the comparison promised in the plan.
+3. **Pass 2 — Metaculus** — `BinaryForecast`, `BinaryPredictor` ABC, discrete event evaluation loop.
+
+---
+
 ## Apr 2, 2026 (session 4) — Backtest interface design
 
 ### Design direction decided (no code yet)

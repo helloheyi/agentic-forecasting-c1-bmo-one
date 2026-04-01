@@ -70,7 +70,7 @@ def test_read_zip_parses_dates(tmp_path: Path) -> None:
 
 
 def test_fetch_filters_and_returns_canonical_format(adapter: StatCanAdapter) -> None:
-    """fetch() filters to the configured series and returns (timestamp, value)."""
+    """fetch() filters to the configured series and returns (timestamp, value, released_at)."""
     raw = _make_raw_statcan_df()
     with (
         patch(f"{_MODULE}._read_zip", return_value=raw),
@@ -78,9 +78,22 @@ def test_fetch_filters_and_returns_canonical_format(adapter: StatCanAdapter) -> 
     ):
         result = adapter.fetch()
 
-    assert set(result.columns) == {"timestamp", "value"}
+    assert set(result.columns) == {"timestamp", "value", "released_at"}
     assert list(result["value"]) == [151.2, 152.4]
     assert result["timestamp"].is_monotonic_increasing
+
+
+def test_fetch_released_at_is_21_days_after_timestamp(adapter: StatCanAdapter) -> None:
+    """released_at must be exactly 21 days after the reference month timestamp."""
+    raw = _make_raw_statcan_df()
+    with (
+        patch(f"{_MODULE}._read_zip", return_value=raw),
+        patch(f"{_MODULE}.Path.exists", return_value=True),
+    ):
+        result = adapter.fetch()
+
+    delta = (result["released_at"] - result["timestamp"]).dt.days
+    assert (delta == 21).all()
 
 
 def test_fetch_drops_nan_values(adapter: StatCanAdapter) -> None:

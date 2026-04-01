@@ -1,0 +1,290 @@
+"""BacktestSpec, BacktestResult, and the backtest() harness."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import numpy as np
+import pandas as pd
+import properscoring as ps
+from pydantic import BaseModel, Field, model_validator
+
+from aieng.forecasting.data.service import DataService
+from aieng.forecasting.evaluation.prediction import ContinuousForecast, Prediction
+from aieng.forecasting.evaluation.predictor import Predictor
+from aieng.forecasting.evaluation.task import ForecastingTask
+
+
+class BacktestSpec(BaseModel):
+    """Specifies when and how often to evaluate a predictor against a task.
+
+    ``BacktestSpec`` separates the *evaluation window* from the prediction
+    problem itself. A :class:`ForecastingTask` defines *what* to forecast;
+    ``BacktestSpec`` wraps a task and adds *when* and *how often* to run
+    the harness.
+
+    Because ``BacktestSpec`` is a Pydantic model it is YAML-serializable,
+    making evaluation windows shareable and reproducible. Reference specs for
+    canonical tasks live in ``reference_specs/`` in the repo root.
+
+    Parameters
+    ----------
+    task : ForecastingTask
+        The prediction problem to evaluate.
+    start : datetime
+        First candidate forecast origin.
+    end : datetime
+        Last candidate forecast origin (inclusive).
+    stride : int
+        Step size between origins in task-frequency units. ``stride=1`` means
+        every period; ``stride=6`` on monthly data means twice per year
+        (January and July when ``start`` falls on a month boundary).
+    warmup : int
+        Minimum number of observations required in the cutoff-filtered series
+        before a forecast origin is used. Origins that do not have enough
+        history are silently skipped.
+
+    Examples
+    --------
+    >>> from datetime import datetime
+    >>> spec = BacktestSpec(
+    ...     task=ForecastingTask(
+    ...         task_id="cpi_all_items_canada_12m",
+    ...         target_series_id="cpi_all_items_canada",
+    ...         horizon=12,
+    ...         frequency="MS",
+    ...         description="CPI All-items Canada, 12-month ahead forecast",
+    ...     ),
+    ...     start=datetime(2000, 1, 1),
+    ...     end=datetime(2026, 1, 1),
+    ...     stride=6,
+    ...     warmup=24,
+    ... )
+    >>> origins = spec.origins()
+    >>> len(origins) > 0
+    True
+    """
+
+    task: ForecastingTask
+    start: datetime = Field(description="First candidate forecast origin.")
+    end: datetime = Field(description="Last candidate forecast origin (inclusive).")
+    stride: int = Field(default=1, ge=1, description="Step size between origins in task-frequency units.")
+    warmup: int = Field(default=0, ge=0, description="Minimum observations required before first forecast.")
+
+    @model_validator(mode="after")
+    def start_before_end(self) -> "BacktestSpec":
+        """Validate that start precedes end."""
+        if self.start >= self.end:
+            raise ValueError(f"start ({self.start}) must be before end ({self.end})")
+        return self
+
+    def origins(self) -> list[datetime]:
+        """Return the candidate forecast origins derived from this spec.
+
+        Origins are generated using ``pd.date_range`` with the task's
+        frequency and the configured stride. The returned list does not apply
+        the warmup filter — that is applied inside :func:`backtest` where the
+        actual series data is available.
+
+        Returns
+        -------
+        list[datetime]
+            Candidate forecast origin dates, sorted ascending.
+        """
+        all_dates = pd.date_range(start=self.start, end=self.end, freq=self.task.frequency)
+        strided = all_dates[:: self.stride]
+        return [ts.to_pydatetime() for ts in strided]
+
+
+class BacktestResult(BaseModel):
+    """The outcome of a backtest run — a self-contained, serializable record.
+
+    ``BacktestResult`` is a first-class Pydantic model (not just a DataFrame
+    of numbers). It is designed to be YAML-roundtrippable so that results can
+    be persisted alongside predictor implementations, fed to downstream agents
+    as structured context, or used as submission artefacts in a future
+    competition mechanism.
+
+    Parameters
+    ----------
+    spec : BacktestSpec
+        The exact spec that was evaluated.
+    predictor_id : str
+        Identifier for the predictor that produced these forecasts.
+    predictions : list[Prediction]
+        One ``Prediction`` per evaluated forecast origin, in chronological order.
+    scores : list[float]
+        CRPS score for each prediction, in the same order as ``predictions``.
+        Lower is better.
+    mean_crps : float
+        Mean CRPS across all evaluated origins.
+    ran_at : datetime
+        UTC wall-clock time when the backtest was executed.
+    skipped_origins : int
+        Number of candidate origins skipped due to insufficient warmup history.
+    """
+
+    spec: BacktestSpec
+    predictor_id: str
+    predictions: list[Prediction]
+    scores: list[float]
+    mean_crps: float
+    ran_at: datetime
+    skipped_origins: int = Field(default=0, description="Candidate origins skipped due to warmup.")
+
+    @model_validator(mode="after")
+    def lengths_match(self) -> "BacktestResult":
+        """Validate that predictions and scores have the same length."""
+        if len(self.predictions) != len(self.scores):
+            raise ValueError(
+                f"predictions ({len(self.predictions)}) and scores ({len(self.scores)}) must have the same length"
+            )
+        return self
+
+
+def _crps_for_prediction(prediction: Prediction, actual: float) -> float:
+    """Compute CRPS for a single ContinuousForecast against an observed value.
+
+    Uses ``properscoring.crps_ensemble`` with the quantile forecast values
+    as an ensemble. While quantile values are not independent samples from
+    the predictive distribution, this gives a reasonable CRPS approximation
+    when the quantile grid is sufficiently fine.
+
+    Parameters
+    ----------
+    prediction : Prediction
+        Must have a :class:`ContinuousForecast` payload.
+    actual : float
+        The observed value at the forecast date.
+
+    Returns
+    -------
+    float
+        CRPS score (lower is better).
+    """
+    payload: ContinuousForecast = prediction.payload
+    ensemble = np.array(sorted(payload.quantiles.values()), dtype=float)
+    return float(ps.crps_ensemble(actual, ensemble))
+
+
+def _resolve(
+    task: ForecastingTask,
+    forecast_date: datetime,
+    data_service: DataService,
+) -> float | None:
+    """Look up the observed value at a forecast date.
+
+    Queries the data service with a sufficiently late ``as_of`` to ensure the
+    observation is available. Returns ``None`` if the observation is not found
+    (e.g. the forecast date is in the future).
+
+    Parameters
+    ----------
+    task : ForecastingTask
+        Used to identify the target series.
+    forecast_date : datetime
+        The date whose observed value is needed.
+    data_service : DataService
+        The data service to query.
+
+    Returns
+    -------
+    float or None
+        The observed value, or ``None`` if unavailable.
+    """
+    # Query with today as as_of to get all available data including future observations.
+    as_of_now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    full_series = data_service.get_series(task.target_series_id, as_of=as_of_now)
+
+    target_ts = pd.Timestamp(forecast_date)
+    match = full_series[pd.to_datetime(full_series["timestamp"]) == target_ts]
+    if match.empty:
+        return None
+    return float(match["value"].iloc[0])
+
+
+def backtest(
+    predictor: Predictor,
+    spec: BacktestSpec,
+    data_service: DataService,
+) -> BacktestResult:
+    """Run a backtest of a predictor against a BacktestSpec.
+
+    Iterates over forecast origins derived from the spec, calls the predictor
+    at each origin (with a :class:`~aieng.forecasting.data.context.ForecastContext`
+    scoped to that date), resolves predictions against the observed series, and
+    scores with CRPS.
+
+    Origins with insufficient history (fewer than ``spec.warmup`` observations
+    in the cutoff-filtered series) are silently skipped. Origins whose
+    ``forecast_date`` has not yet been observed are also skipped with a warning.
+
+    Parameters
+    ----------
+    predictor : Predictor
+        The forecasting model to evaluate.
+    spec : BacktestSpec
+        Defines the task, evaluation window, stride, and warmup.
+    data_service : DataService
+        Pre-populated data service. Must have the target series registered.
+
+    Returns
+    -------
+    BacktestResult
+        A fully populated result record including all predictions and CRPS scores.
+
+    Raises
+    ------
+    KeyError
+        If the target series is not registered in the data service.
+    ValueError
+        If no origins produce a resolvable prediction (all skipped).
+
+    Examples
+    --------
+    >>> results = backtest(predictor=ARIMAPredictor(), spec=spec, data_service=svc)
+    >>> print(f"Mean CRPS: {results.mean_crps:.4f}")
+    """
+    candidate_origins = spec.origins()
+    predictions: list[Prediction] = []
+    scores: list[float] = []
+    skipped = 0
+
+    for origin in candidate_origins:
+        ctx = data_service.context(as_of=origin)
+
+        # Apply warmup filter: skip origins with insufficient history.
+        if spec.warmup > 0:
+            series = ctx.get_series(spec.task.target_series_id)
+            if len(series) < spec.warmup:
+                skipped += 1
+                continue
+
+        prediction = predictor.predict(spec.task, ctx)
+
+        actual = _resolve(spec.task, prediction.forecast_date, data_service)
+        if actual is None:
+            # Forecast date not yet observed — skip silently.
+            skipped += 1
+            continue
+
+        score = _crps_for_prediction(prediction, actual)
+        predictions.append(prediction)
+        scores.append(score)
+
+    if not predictions:
+        raise ValueError(
+            f"No predictions were scored. All {len(candidate_origins)} candidate origins were skipped. "
+            f"Check that the target series covers the backtest window and that warmup ({spec.warmup}) "
+            f"is not too large."
+        )
+
+    return BacktestResult(
+        spec=spec,
+        predictor_id=predictor.predictor_id,
+        predictions=predictions,
+        scores=scores,
+        mean_crps=float(np.mean(scores)),
+        ran_at=datetime.now(tz=timezone.utc).replace(tzinfo=None),
+        skipped_origins=skipped,
+    )
