@@ -34,8 +34,17 @@ class ForecastingTask(BaseModel):
         How ground truth is determined. Defaults to
         ``"observed_value_at_resolution_timestamp"``, meaning the resolution
         is the actual observed value of ``target_series_id`` at the target
-        timestamp. Alternative strategies (e.g. for derived quantities) can
-        be named here and implemented in the evaluation harness.
+        timestamp.
+
+        .. note::
+            **This field is currently a placeholder.** The evaluation harness
+            (``backtest()`` and ``evaluate()``) always uses the
+            ``"observed_value_at_resolution_timestamp"`` strategy regardless
+            of this value. Dispatch on ``resolution_fn`` is deferred; the
+            field is defined now so that task specs and result records carry
+            the intent, and so that alternative strategies (e.g. for derived
+            quantities or aggregated targets) can be added without a breaking
+            change to the model.
 
     Notes
     -----
@@ -72,6 +81,8 @@ class ForecastingTask(BaseModel):
     resolution_fn: str = Field(
         default="observed_value_at_resolution_timestamp",
         description=(
-            "How ground truth is determined. Default resolves to the observed series value at the target timestamp."
+            "How ground truth is determined. Placeholder — harness currently always uses "
+            "'observed_value_at_resolution_timestamp' regardless of this value. "
+            "Dispatch on alternative strategies is deferred."
         ),
     )

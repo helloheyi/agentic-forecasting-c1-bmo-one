@@ -15,6 +15,33 @@ from aieng.forecasting.evaluation.predictor import Predictor
 from aieng.forecasting.evaluation.task import ForecastingTask
 
 
+def _compute_origins(start: datetime, end: datetime, frequency: str, stride: int) -> list[datetime]:
+    """Compute strided forecast origin dates for a spec window.
+
+    Shared by :class:`BacktestSpec` and :class:`~aieng.forecasting.evaluation.eval.EvalSpec`
+    to avoid duplicating the striding logic.
+
+    Parameters
+    ----------
+    start : datetime
+        First candidate origin.
+    end : datetime
+        Last candidate origin (inclusive).
+    frequency : str
+        Pandas offset alias (e.g. ``"MS"``).
+    stride : int
+        Step size between origins in frequency units.
+
+    Returns
+    -------
+    list[datetime]
+        Candidate forecast origin dates, sorted ascending.
+    """
+    all_dates = pd.date_range(start=start, end=end, freq=frequency)
+    strided = all_dates[::stride]
+    return [ts.to_pydatetime() for ts in strided]
+
+
 class BacktestSpec(BaseModel):
     """Specifies when and how often to evaluate a predictor against a task.
 
@@ -91,9 +118,7 @@ class BacktestSpec(BaseModel):
         list[datetime]
             Candidate forecast origin dates, sorted ascending.
         """
-        all_dates = pd.date_range(start=self.start, end=self.end, freq=self.task.frequency)
-        strided = all_dates[:: self.stride]
-        return [ts.to_pydatetime() for ts in strided]
+        return _compute_origins(self.start, self.end, self.task.frequency, self.stride)
 
 
 class BacktestResult(BaseModel):
@@ -203,6 +228,76 @@ def _resolve(
     return float(match["value"].iloc[0])
 
 
+def run_eval_loop(
+    predictor: Predictor,
+    task: ForecastingTask,
+    origins: list[datetime],
+    warmup: int,
+    data_service: DataService,
+) -> tuple[list[Prediction], list[float], int]:
+    """Core evaluation loop shared by ``backtest()`` and ``evaluate()``.
+
+    Iterates over ``origins``, calls the predictor at each origin, resolves
+    predictions against the observed series, and scores with CRPS.
+
+    Parameters
+    ----------
+    predictor : Predictor
+        The forecasting model to evaluate.
+    task : ForecastingTask
+        The prediction problem being evaluated.
+    origins : list[datetime]
+        Candidate forecast origin dates (already strided / derived from a spec).
+    warmup : int
+        Minimum number of observations required before a forecast origin is used.
+    data_service : DataService
+        Pre-populated data service. Must have the target series registered.
+
+    Returns
+    -------
+    tuple[list[Prediction], list[float], int]
+        ``(predictions, scores, skipped)`` — parallel lists of predictions and
+        CRPS scores, plus the count of origins that were skipped.
+
+    Raises
+    ------
+    ValueError
+        If no origins produce a resolvable prediction.
+    """
+    predictions: list[Prediction] = []
+    scores: list[float] = []
+    skipped = 0
+
+    for origin in origins:
+        ctx = data_service.context(as_of=origin)
+
+        if warmup > 0:
+            series = ctx.get_series(task.target_series_id)
+            if len(series) < warmup:
+                skipped += 1
+                continue
+
+        prediction = predictor.predict(task, ctx)
+
+        actual = _resolve(task, prediction.forecast_date, data_service)
+        if actual is None:
+            skipped += 1
+            continue
+
+        score = _crps_for_prediction(prediction, actual)
+        predictions.append(prediction)
+        scores.append(score)
+
+    if not predictions:
+        raise ValueError(
+            f"No predictions were scored. All {len(origins)} candidate origins were skipped. "
+            f"Check that the target series covers the evaluation window and that warmup ({warmup}) "
+            f"is not too large."
+        )
+
+    return predictions, scores, skipped
+
+
 def backtest(
     predictor: Predictor,
     spec: BacktestSpec,
@@ -242,43 +337,16 @@ def backtest(
 
     Examples
     --------
-    >>> results = backtest(predictor=ARIMAPredictor(), spec=spec, data_service=svc)
+    >>> results = backtest(predictor=my_predictor, spec=spec, data_service=svc)
     >>> print(f"Mean CRPS: {results.mean_crps:.4f}")
     """
-    candidate_origins = spec.origins()
-    predictions: list[Prediction] = []
-    scores: list[float] = []
-    skipped = 0
-
-    for origin in candidate_origins:
-        ctx = data_service.context(as_of=origin)
-
-        # Apply warmup filter: skip origins with insufficient history.
-        if spec.warmup > 0:
-            series = ctx.get_series(spec.task.target_series_id)
-            if len(series) < spec.warmup:
-                skipped += 1
-                continue
-
-        prediction = predictor.predict(spec.task, ctx)
-
-        actual = _resolve(spec.task, prediction.forecast_date, data_service)
-        if actual is None:
-            # Forecast date not yet observed — skip silently.
-            skipped += 1
-            continue
-
-        score = _crps_for_prediction(prediction, actual)
-        predictions.append(prediction)
-        scores.append(score)
-
-    if not predictions:
-        raise ValueError(
-            f"No predictions were scored. All {len(candidate_origins)} candidate origins were skipped. "
-            f"Check that the target series covers the backtest window and that warmup ({spec.warmup}) "
-            f"is not too large."
-        )
-
+    predictions, scores, skipped = run_eval_loop(
+        predictor=predictor,
+        task=spec.task,
+        origins=spec.origins(),
+        warmup=spec.warmup,
+        data_service=data_service,
+    )
     return BacktestResult(
         spec=spec,
         predictor_id=predictor.predictor_id,

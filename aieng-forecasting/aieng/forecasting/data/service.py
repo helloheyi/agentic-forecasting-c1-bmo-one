@@ -37,7 +37,7 @@ class DataService:
     >>> from aieng.forecasting.data.adapters import StatCanAdapter
     >>> svc = DataService()
     >>> adapter = StatCanAdapter(
-    ...     table_id="18-10-0004-13",
+    ...     table_id="18-10-0004-11",
     ...     member_filter={"GEO": "Canada", "Products and product groups": "All-items"},
     ... )
     >>> meta = SeriesMetadata(
@@ -46,7 +46,7 @@ class DataService:
     ...     source="StatCan",
     ...     units="Index 2002=100",
     ...     frequency="MS",
-    ...     table_id="18-10-0004-13",
+    ...     table_id="18-10-0004-11",
     ... )
     >>> svc.register("cpi_all_items_canada", adapter, meta)
     >>> df = svc.get_series("cpi_all_items_canada", as_of=datetime(2023, 1, 1))

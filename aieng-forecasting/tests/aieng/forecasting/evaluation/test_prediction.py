@@ -74,3 +74,22 @@ class TestPrediction:
         assert restored.predictor_id == pred.predictor_id
         assert restored.forecast_date == pred.forecast_date
         assert restored.payload.point_forecast == pred.payload.point_forecast
+
+    def test_metadata_defaults_to_empty_dict(self) -> None:
+        pred = _make_prediction()
+        assert pred.metadata == {}
+
+    def test_metadata_roundtrip(self) -> None:
+        """Populated metadata must survive model_dump / model_validate cycle."""
+        meta = {"tokens_used": 1234, "sources": ["statcan", "fred"], "trace_id": "abc-123"}
+        pred = _make_prediction(metadata=meta)
+        dumped = pred.model_dump()
+        restored = Prediction.model_validate(dumped)
+        assert restored.metadata == meta
+
+    def test_metadata_not_shared_between_instances(self) -> None:
+        """Each Prediction should have its own metadata dict (no aliasing)."""
+        pred_a = _make_prediction()
+        pred_b = _make_prediction()
+        pred_a.metadata["key"] = "value"
+        assert "key" not in pred_b.metadata

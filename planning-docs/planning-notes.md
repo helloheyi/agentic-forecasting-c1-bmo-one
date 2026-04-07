@@ -1,4 +1,247 @@
-## Apr 2, 2026 (session 5) — CPI backtest end-to-end implementation
+## Apr 7, 2026 — Implementations architecture: follow-up decisions [Ethan & Agent]
+
+### Decided: remove `darts_arima.py`
+
+The standalone `implementations/economic_forecasting/predictors/darts_arima.py`
+is redundant now that `predictor_template.py` fills the "copy this to write
+your own" role and the demo notebook shows the full implementation inline.
+Keeping both creates a maintenance tax (two copies of the same code to keep
+in sync) and a decision burden for participants ("which file do I start from?").
+
+**Decision:** delete `darts_arima.py`. The pair of `predictor_template.py`
+(starting point) + inline notebook definition (working demonstration) is
+the clean, non-overlapping split.
+
+When experiment scripts need an importable predictor, add the `.py` file at
+that point with clear purpose — not speculatively.
+
+### Decided: no mid-level `implementations/predictors/` layer yet
+
+A top-level `implementations/predictors/` (method implementations not tied
+to any use case) is the right model *once* the same predictor is needed in
+two different use-case folders. That duplication hasn't appeared yet.
+**Decision:** don't create the middle layer until there's a concrete reason.
+Apply the same "two concrete instances before abstracting" rule used
+everywhere else.
+
+### Noted: agent backbone belongs in the package
+
+When agentic predictors are built, the ADK setup, tool definitions, and
+prompt scaffolding are reusable infrastructure — not use-case demonstrations.
+Those should live in `aieng-forecasting` (e.g. `aieng/forecasting/agents/`),
+while task-specific agent configuration lives in `implementations/`. This is
+a cleaner cut than a mid-level `implementations/` layer for that case.
+
+---
+
+## Apr 7, 2026 — Lift predictors to implementations [Agent]
+
+### What changed
+
+**Architectural decision:** the `aieng-forecasting` package now owns zero
+concrete predictor implementations. Darts ships models; the package ships
+the interface. Reference implementations of how to use those models with
+our `Predictor` ABC belong in `implementations/`, visible to bootcamp
+participants in the same place as the notebooks and experiments.
+
+**Deleted from the package:**
+- `aieng-forecasting/aieng/forecasting/evaluation/predictors/arima.py`
+- `aieng-forecasting/aieng/forecasting/evaluation/predictors/__init__.py`
+- `ARIMAPredictor` removed from `evaluation/__init__.py` exports
+
+**New files in `implementations/economic_forecasting/`:**
+- `predictors/darts_arima.py` — `DartsAutoARIMAPredictor`, the moved
+  implementation renamed to make the Darts dependency explicit
+- `predictors/predictor_template.py` — annotated last-value naive baseline;
+  the "start here" file for a participant writing their first predictor
+- `README.md` — use case description, learning path, and interface reference
+
+**Updated:**
+- `cpi_backtest_demo.ipynb` — predictor now defined inline in the notebook
+  (identical to `predictors/darts_arima.py`) so participants see the full
+  implementation in the linear flow
+- `technical-design.md` — package structure diagram updated; predictor
+  placement principle documented
+- Docstrings in `backtest.py` and `eval.py` no longer reference
+  `ARIMAPredictor` by name
+
+No test changes required — all tests use a locally-defined `ConstantPredictor`.
+74 tests, `make lint` clean.
+
+### Decisions made
+
+- **Package = infrastructure only.** `Predictor` ABC + evaluation engines +
+  data layer. No concrete implementations.
+- **Darts predictors are not wrapped once and packaged.** The pattern of
+  "here is how you wrap a Darts model in 20 lines" is demonstrated in
+  `implementations/`, not encoded as a library class.
+- **Agentic predictor backbone (future).** When we build ADK-based
+  forecasting agents, the agent definition/tooling will live in the
+  package (since it's genuinely reusable infrastructure). The task-specific
+  configuration and experiments will live in `implementations/`.
+
+---
+
+## Apr 3, 2026 (session 4) — Faithfulness review: all TODOs resolved [Agent]
+
+All 11 items from the session 3 audit were fixed in this session. Summary:
+
+**Category A (doc/code inconsistencies):**
+- `technical-design.md` Unified Loop: corrected `question_id` → `task_id`, `horizon` → `forecast_date`, added `as_of`
+- `technical-design.md` `BacktestResult` snippet: added `skipped_origins: int`
+- `arima.py`: replaced deprecated `datetime.utcnow()` with `datetime.now(tz=timezone.utc).replace(tzinfo=None)` (consistent with `backtest.py` and `eval.py`)
+- `task.py` + `technical-design.md`: documented `resolution_fn` explicitly as a placeholder; the harness currently ignores it and always uses the default observed-value strategy
+
+**Category B (stale documentation):**
+- `technical-design.md` package structure: added `eval.py` and `backtest.py` to the diagram
+- `technical-design.md`: removed stale inline "Build sequence for this layer" list from the Backtesting section (the ✅-marked Phase 1 sequence at the bottom is the authoritative tracker)
+- `service.py` docstring example: updated table ID from `18-10-0004-13` → `18-10-0004-11`
+- `ContinuousForecast` docstring: corrected quantile constraint ("keys must be in (0,1); standard levels recommended but not enforced")
+
+**Category C (design debt):**
+- Extracted `_compute_origins()` shared utility to `backtest.py`; both `BacktestSpec.origins()` and `EvalSpec.origins()` now delegate to it (DRY)
+- Renamed `_run_eval_loop` → `run_eval_loop` (dropped private prefix since it intentionally crosses module boundaries into `eval.py`)
+- Removed unused `import pandas as pd` from `eval.py` (pandas was only needed for the now-extracted origins logic)
+
+74 tests, `make lint` clean.
+
+---
+
+## Apr 3, 2026 (session 3) — Faithfulness review: TODOs from doc/code audit [Agent]
+
+The following items were found during a thorough cross-check of `technical-design.md`,
+`planning-notes.md`, and all code under `aieng-forecasting/`. Grouped by severity.
+Nothing was edited directly — these are TODOs to address in a future session.
+
+### Category A — Genuine doc/code inconsistencies (fix promptly)
+
+**TODO A1 — `technical-design.md`: stale field names in the Unified Loop section**
+The Prediction bullet in "Unified Loop" reads:
+> `question_id`, `predictor_id`, `issued_at`, `horizon`
+The actual `Prediction` model uses `task_id` (not `question_id`) and `forecast_date`
+(not `horizon`). `as_of` is also missing. Update that bullet to match the real fields.
+
+**TODO A2 — `technical-design.md`: `BacktestResult` code snippet is incomplete**
+The inline Python snippet in the "BacktestResult" subsection (inside "Backtesting:
+User Model and Interfaces") is missing the `skipped_origins: int` field that exists
+in the actual code and matters for understanding skip behaviour. Add it to the snippet.
+
+**TODO A3 — `arima.py` line 125: `datetime.utcnow()` is deprecated**
+`ARIMAPredictor.predict()` uses `datetime.utcnow()`, which is deprecated since
+Python 3.12 and will warn (or break in future versions). Both `backtest.py` and
+`eval.py` already use `datetime.now(tz=timezone.utc).replace(tzinfo=None)`. Fix
+`arima.py` to match.
+
+**TODO A4 — `ForecastingTask.resolution_fn` is defined but never used**
+`ForecastingTask` has a `resolution_fn: str` field (default
+`"observed_value_at_resolution_timestamp"`), but `_resolve()` in `backtest.py`
+ignores it entirely — it always looks up the observed series value directly.
+The field is currently dead config. Either: (a) document it explicitly as a
+planned-but-unimplemented feature in both the task docstring and `technical-design.md`,
+or (b) remove it and add it back when the dispatch is implemented. Leaving it silent
+will confuse implementors who configure it expecting it to do something.
+
+### Category B — Stale documentation (clean up when convenient)
+
+**TODO B1 — `technical-design.md`: package structure diagram missing `eval.py`**
+The diagram under "Package: aieng-forecasting" shows:
+```
+└── evaluation/
+    └── predictors/
+```
+but `evaluation/eval.py` was added. Update the diagram to include it.
+
+**TODO B2 — `technical-design.md`: "Build sequence for this layer" inside the
+Backtesting section is stale planning content**
+The numbered list (`1. ContinuousForecast + Prediction models … 7. End-to-end run`)
+inside the Backtesting subsection was the pre-build plan and is now fully done. The
+authoritative tracker is the ✅-marked Phase 1 Build Sequence at the bottom of the
+document. The inline one adds no information and could confuse readers. Consider
+removing it or replacing it with a pointer to the Phase 1 sequence.
+
+**TODO B3 — `service.py` docstring example uses the old table ID `"18-10-0004-13"`**
+The `DataService` class docstring example shows `table_id="18-10-0004-13"`, but the
+canonical current table ID (corrected Apr 1) is `"18-10-0004-11"`. Both normalise to
+the same zip, but for clarity the example should match what `scripts/fetch_cpi.py`
+actually uses.
+
+**TODO B4 — `ContinuousForecast` docstring overstates the validator constraint**
+The docstring says `quantiles` "Must contain at least the standard levels defined in
+`STANDARD_QUANTILES`", but the actual validator only checks that keys are in `(0, 1)`.
+There is no enforcement of standard level presence. Fix the docstring to match the
+real constraint, or add the enforcement if presence of standard levels is actually
+required.
+
+### Category C — Design debt (low priority, track for later)
+
+**TODO C1 — `EvalSpec.origins()` and `BacktestSpec.origins()` are identical**
+Both classes implement the same striding logic (`pd.date_range` + slice + `to_pydatetime()`).
+Minor DRY violation. Could extract to a shared private utility or a common base class
+when the design stabilises.
+
+**TODO C2 — `_run_eval_loop` is a private function crossing module boundaries**
+`eval.py` imports `_run_eval_loop` from `backtest.py` by its private name. A private
+function in the public API of another module is an unusual pattern that could confuse
+contributors. Consider either making it semi-public (drop the leading underscore) or
+moving it to a shared internal module (e.g. `evaluation/_loop.py`) so the boundary is
+explicit.
+
+**TODO C3 — `eval.py`: `import pandas as pd` is misplaced in the import block**
+`import pandas as pd` appears at line 49, after the pydantic/local imports, instead of
+grouped with the other third-party imports. Doesn't fail lint (isort not configured)
+but is inconsistent with project style.
+
+---
+
+## Apr 3, 2026 (session 2) — Prediction metadata + eval mode [Agent]
+
+### What we built
+
+Two additive features on top of the Phase 1 backtest layer.
+
+**`Prediction.metadata`** (`aieng/forecasting/evaluation/prediction.py`):
+- Added `metadata: dict[str, Any]` field to `Prediction`, defaulting to `{}`.
+- The harness never reads or validates it — passes through transparently to `BacktestResult.predictions` and `EvalResult.predictions`.
+- Predictors populate it with whatever structured side-channel data they want (token counts, source lists, Langfuse trace IDs, etc.). No schema enforced beyond `dict[str, Any]`.
+- `Predictor` ABC docstring updated to document this as the canonical pattern for "things that travel with a prediction."
+
+**Eval mode** (`aieng/forecasting/evaluation/eval.py`):
+- `EvalSpec` — mirrors `BacktestSpec` with `spec_id` (tracker key) and `max_runs` (optional budget cap encoded directly in the spec YAML).
+- `EvalResult` — analogous to `BacktestResult`, adds `run_number` provenance (which run against this spec this was).
+- `EvalTracker` — file-backed YAML counter. `runs_for(spec_id)` / `record(spec_id, ran_at)`. Survives process restarts. Path is caller-supplied; wiring to per-user identity is deferred.
+- `EvalBudgetExceededError` — `ValueError` subclass with a clear message when a budget is exhausted.
+- `evaluate()` — checks budget, runs the shared `_run_eval_loop()` (also used by `backtest()`), records the run, returns `EvalResult` with `run_number`.
+- `reference_specs/cpi_allitems_eval_2yr.yaml` — 2024–2026 held-out window, `max_runs: 5`, as a worked example.
+
+**Infra:** extracted `_run_eval_loop()` from `backtest()` to avoid duplication. `evaluation/__init__.py` exports all new symbols. 23 new tests (74 total). `make lint` clean. `technical-design.md` updated.
+
+### Decisions made in discussion
+
+- **Predictor side-effects are free** — predictors may write logs, traces, or any other artifacts as side-effects without the harness caring. `Prediction.metadata` is only for structured data that should travel *with* each prediction.
+- **`metadata` stays generic** — `dict[str, Any]`. No schema enforced at the interface level; users define structure internally.
+- **Eval mode is the "validation set" concept** — backtesting is for learning/tuning (run freely); eval is the held-out window (spend deliberately). `max_runs` on the spec + `EvalTracker` enforce this.
+- **Notebook polish tabled** — the demo notebook runs well. Confidence interval shading and multi-series comparison are deferred.
+
+### What's next
+
+1. **Second predictor** — add a second variant (seasonal naive or fixed-order ARIMA via Darts) to make the comparison the Phase 1 plan called for. This will also be the first real use of `Prediction.metadata` in practice.
+2. **Pass 2 — Metaculus** — `BinaryForecast`, `BinaryPredictor` ABC, discrete event evaluation loop.
+3. **Per-user eval tracking** — defer until bootcamp infrastructure is more defined, but the hook (`EvalTracker` path) is ready.
+4. **Notebook polish** — confidence interval shading, multi-series CPI comparison (Food, Shelter, Water/fuel/electricity). Tabled for now but worth revisiting before the bootcamp.
+
+---
+
+## Apr 3, 2026 (session 1) [Ethan]
+
+A couple of questions on my mind today. These might not be actual problems, but things to think about against our design.
+
+- We're working towards standardizing interfaces for the backtesting/eval engines. I want to make sure we're thinking about all the kinds of artifacts that a Predictor might produce over the course of its work. Should we be defining interfaces for these? I'm thinking not. There is probably a basic level of data we expect a Predictor to produce (... the predictions ...) but I think beyond that we might not want to over-design things. Maybe we should leave it to the user to build/adapt their predictors so that they produce the side-effects/outputs they desire. BUT if there is a reasonable pattern for Predictors to be able to return additional artifacts as they're used in an experiment, that might be good to do. Overall I am thinking: if users want to implement Predictors that create additional artifacts (like agent traces, statistics, plots, other data, etc.) -- do we want to support that in the official interfaces or leave that to users to deal with? Is there some basic pattern that makes sense for cases like this, or are we better to just completely separate backtest/experiments/evals from whatever else might be going on in a predictor implementation? I definitely need some advice here!
+
+- Another thing I want to consider is building in support for something in between backtesting and live testing. I'm imagining right now if we applied a meta learning algorithm (or even just an agentic loop) over the backtesting process, there is lots of opportunity for bias/data leakage. We might want to add a third mode (validation? test? ???) with the expectation that users would run very many backtesting runs for learning/tuning/exploration purposes, but then want to run relatively few checks against a slice of recent data. This could look more like rolling/time series cross validation, but where we are especially trying to limit how much we might "learn" from the most recent data. Of course, there will be no substitute for true live testing, especially with agentic predictors that might access live sources of information (i.e. even if we try to cut off news searches past a certain date, it will be really hard to control information leakage, but we will try).
+
+- And just a small thing, but I want to make sure we iterate on the base reference experiment and notebook a bit. I would love to actually see the full prediction confidence intervals as shaded regions, clean up some of the overlapping label, and focus just on predictions for the last 10 years. Perhaps we could expand it to a few more CPI time series, e.g. I would love to see some of the main categories compared: "Food" "Shelter" "Water, fuel and electricity" in a nice, clean visual analysis.
+
+## Apr 2, 2026 (session 5) — CPI backtest end-to-end implementation [Agent]
 
 ### What we built
 
@@ -42,7 +285,7 @@ print(f"Mean CRPS: {results.mean_crps:.4f}")
 
 ---
 
-## Apr 2, 2026 (session 4) — Backtest interface design
+## Apr 2, 2026 (session 4) — Backtest interface design [Ethan & Agent]
 
 ### Design direction decided (no code yet)
 
@@ -67,7 +310,7 @@ print(f"Mean CRPS: {results.mean_crps:.4f}")
 
 ---
 
-## Apr 2, 2026 (session 3) — ForecastContext: interface design + implementation
+## Apr 2, 2026 (session 3) — ForecastContext: interface design + implementation [Ethan & Agent]
 
 ### What we discussed
 
@@ -107,7 +350,7 @@ def predict(task: ForecastingTask, context: ForecastContext) -> Prediction:
 
 ---
 
-## Apr 2, 2026 (session 2)
+## Apr 2, 2026 (session 2) [Ethan]
 
 - I've now played around with the statcan code a bit and found it flexible enough to start with. We can download historical data into series just fine.
 - I think the next step is to think about how we could start working with an actual forecasting problem. I'm thinking today about backtesting, evaluation, and how we might design the live evaluation mechanism.
@@ -118,7 +361,7 @@ def predict(task: ForecastingTask, context: ForecastContext) -> Prediction:
 -- I think this is something I want to think about: would it make sense for the data service and/or backtesting engine to determine and limit (well, try to limit) what data are available to the predictor, and then the predictor can just do whatever it does under the hood, then generate a prediction? I guess my question is: are the underlying interfaces and the contracts between the components in this system really possible to keep simple, elegant, and effective? I want to do some good, slow thinking about this before we get much further.
 -- And at the end of this, I would love to start with a build goal of running a backtest on two variations of a backtest on a reference forecasting task, just to establish that it works.
 
-## Apr 1, 2026 — CPI series expansion and notebook update (session 1)
+## Apr 1, 2026 — CPI series expansion and notebook update (session 1) [Agent]
 
 ### What we completed
 
@@ -142,7 +385,7 @@ def predict(task: ForecastingTask, context: ForecastContext) -> Prediction:
 
 ---
 
-## Mar 31, 2026 — Bugfix, cleanup, and test review (session 6)
+## Mar 31, 2026 — Bugfix, cleanup, and test review (session 6) [Agent]
 
 ### What we completed
 
@@ -169,7 +412,7 @@ The data service foundation is fully functional:
 
 ---
 
-## Mar 31, 2026 — Data service design + long-term vision (session 3)
+## Mar 31, 2026 — Data service design + long-term vision (session 3) [Ethan & Agent]
 
 Key decisions and design refinements; full details in `technical-design.md`.
 
@@ -183,7 +426,7 @@ Key decisions and design refinements; full details in `technical-design.md`.
 
 ---
 
-## Mar 31, 2026 — First build: StatCan CPI data service (session 5)
+## Mar 31, 2026 — First build: StatCan CPI data service (session 5) [Agent]
 
 Implemented the data service layer and StatCan CPI adapter. All 35 unit tests passing.
 
@@ -197,7 +440,7 @@ Implemented the data service layer and StatCan CPI adapter. All 35 unit tests pa
 
 ---
 
-## Mar 31, 2026 — ForecastingTask / Predictor separation (session 4)
+## Mar 31, 2026 — ForecastingTask / Predictor separation (session 4) [Ethan & Agent]
 
 - Clarified that `ForecastingTask` defines the *problem* only: `task_id`, `target_series_id`, `horizon`, `frequency`, `resolution_fn`, `description`. It says nothing about how to solve the problem.
 - Covariate selection, gap-fill strategy, and model choice are all `Predictor` responsibilities. A predictor requests whatever series it wants from the `DataService` (subject to cutoff); the task doesn't constrain this.
@@ -206,7 +449,7 @@ Implemented the data service layer and StatCan CPI adapter. All 35 unit tests pa
 
 ---
 
-## Mar 31, 2026 — Architecture decisions (session 2)
+## Mar 31, 2026 — Architecture decisions (session 2) [Ethan & Agent]
 
 Key decisions from this session are now recorded in `technical-design.md`. Summary:
 
@@ -223,7 +466,7 @@ Also created `technical-design.md` as the technical source of truth, and updated
 
 ---
 
-## Mar 31, 2026
+## Mar 31, 2026 [Ethan]
 
 I am indeed thinking it makes sense for me to just start building around (1) the Canada's Food Price Report (CFPR) forecasting task and (2) Metaculus forecasting questions. These cover two distinct forecasting modalities: multivariate/multi-target time series forecasting and discrete event prediction.
 
@@ -246,7 +489,7 @@ I just updated the bootcamp-project-charter. A couple of ideas are coming togeth
 - In fact, after some basic review, I think we can make an early decision to lean more into Darts as the default/reference forecasting library that will will support.
 -- (We could even consider building a set of agent skills that would enable agents to use Darts more effectively...)
 
-## Mar 30, 2026
+## Mar 30, 2026 [Ethan]
 TODOs
 
 - Dig into metaculus “data” to see what we can get. Will likely need to reach out to their team to get access for research purposes.

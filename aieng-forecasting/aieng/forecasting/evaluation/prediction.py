@@ -1,6 +1,7 @@
 """Prediction payload types and the Prediction metadata wrapper."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,9 +24,11 @@ class ContinuousForecast(BaseModel):
         Central estimate — typically the median (0.50 quantile) of the
         predictive distribution.
     quantiles : dict[float, float]
-        Mapping from quantile level (in [0, 1]) to forecast value. Must
-        contain at least the standard levels defined in
-        :data:`STANDARD_QUANTILES`, though additional quantiles are allowed.
+        Mapping from quantile level (in [0, 1]) to forecast value. Keys must
+        be strictly in ``(0, 1)``; values are the corresponding forecast
+        values. The standard levels in :data:`STANDARD_QUANTILES` are
+        recommended for compatibility with the CRPS scorer, but any set of
+        quantile keys in range is accepted.
 
     Examples
     --------
@@ -79,6 +82,14 @@ class Prediction(BaseModel):
         The future date being predicted (``as_of`` + horizon steps).
     payload : ContinuousForecast
         The forecast payload.
+    metadata : dict[str, Any]
+        Optional free-form metadata the predictor wants to return alongside the
+        forecast. The evaluation harness never reads or validates this field —
+        it passes through transparently into ``BacktestResult.predictions`` and
+        ``EvalResult.predictions``. Use it to surface structured side-channel
+        data: token counts, source lists, intermediate statistics, agent trace
+        IDs, etc. Anything requiring richer structure should be stored
+        externally (e.g. in Langfuse) and referenced here by ID.
 
     Examples
     --------
@@ -102,3 +113,11 @@ class Prediction(BaseModel):
     as_of: datetime = Field(description="Information cutoff used when generating this prediction.")
     forecast_date: datetime = Field(description="The future date being predicted.")
     payload: ContinuousForecast = Field(description="The forecast payload.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Optional free-form metadata returned alongside the forecast. "
+            "Ignored by the evaluation harness; passes through transparently. "
+            "Use for token counts, source lists, trace IDs, etc."
+        ),
+    )

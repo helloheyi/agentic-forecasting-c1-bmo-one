@@ -1,0 +1,53 @@
+# Reference EvalSpec: CPI All-items Canada, 12-month ahead forecast — 2-year eval window
+#
+# This spec covers a recent 2-year held-out window (2024–2026) intended for
+# estimating how well backtested or learned predictors generalise.  It is
+# deliberately short and protected:
+#
+#   - Use the backtest spec (cpi_allitems_12m.yaml) for learning, tuning, and
+#     exploration — it is designed to be run many times.
+#   - Use this eval spec sparingly.  max_runs: 5 limits how many times a
+#     participant may run evaluate() against it, reducing the risk of
+#     inadvertently over-fitting to the held-out window.
+#
+# To load this spec in Python:
+#
+#   import yaml
+#   from pathlib import Path
+#   from aieng.forecasting.evaluation import EvalSpec, EvalTracker, evaluate
+#
+#   with open("reference_specs/cpi_allitems_eval_2yr.yaml") as f:
+#       spec = EvalSpec.model_validate(yaml.safe_load(f))
+#
+#   tracker = EvalTracker(Path("eval_runs.yaml"))
+#   result = evaluate(predictor=my_predictor, spec=spec, data_service=svc, tracker=tracker)
+#   print(f"Eval mean CRPS: {result.mean_crps:.4f}  (run {result.run_number}/{spec.max_runs})")
+#
+# The target series must be registered before running. Use scripts/fetch_cpi.py
+# to populate the local data cache, then register "cpi_all_items_canada".
+
+spec_id: cpi_allitems_eval_2yr
+
+task:
+  task_id: cpi_all_items_canada_12m
+  target_series_id: cpi_all_items_canada
+  horizon: 12
+  frequency: MS
+  description: >
+    Forecast Canada-wide CPI All-items (index, 2002=100) exactly 12 months
+    ahead of the forecast origin. Evaluated at January and July origins.
+    Ground truth is the observed StatCan CPI value at the resolution date.
+
+# Eval window: January 2024 through January 2026 (recent, held-out data).
+start: "2024-01-01"
+end: "2026-01-01"
+
+# stride=6 on monthly (MS) frequency gives January and July origins.
+stride: 6
+
+# Require 24 months of history before the first forecast.
+warmup: 24
+
+# Budget cap: each participant may run evaluate() against this spec at most 5 times.
+# Enforced by EvalTracker when passed to evaluate().
+max_runs: 5

@@ -33,6 +33,14 @@ class Predictor(ABC):
     cannot be enforced structurally — this is a known limitation and is part
     of the challenge for evaluating such predictors.
 
+    **Side-effects and metadata:** predictors are free to write logs, traces,
+    or other artifacts to disk, to Langfuse, or to any external store as
+    side-effects of ``predict()`` — the harness does not constrain this. For
+    structured data that should travel *with* each prediction (token counts,
+    source lists, agent trace IDs, intermediate statistics), populate the
+    ``Prediction.metadata`` dict. The harness passes it through transparently;
+    callers inspect it as needed.
+
     Examples
     --------
     Implementing a trivial constant predictor::

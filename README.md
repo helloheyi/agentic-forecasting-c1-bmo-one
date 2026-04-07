@@ -1,52 +1,127 @@
-# Implementation Template Repository
+# Agentic Forecasting
 
-This repository serves as the template for implementations created by the Vector AI
-Engineering team. It is designed to be used as a starting point for bootcamps, labs,
-or workshops.
+A research and learning platform for experimenting with forecasting agents on real-world economic, financial, and event prediction tasks. Built for the **Agentic Forecasting Bootcamp**.
 
-## About [Implementation Name]
+---
 
-*Add info on the implementations.*
+## What this is
 
-## Repository Structure
+This repository provides the infrastructure and reference implementations for a bootcamp that teaches participants to build, evaluate, and compare forecasting systems across three paradigms:
 
-- **docs/**: Contains detailed documentation, additional resources, installation guides, and setup instructions that are not covered in this README.
-- **implementations/**: Implementations are organized by topics. Each topic has its own directory containing notebooks, and a README for guidance.
-- **pyproject.toml**: The `pyproject.toml` file in this repository configures various build system requirements and dependencies, centralizing project settings in a standardized format.
+- **Numerical forecasters** — statistical and ML models (ARIMA, gradient boosting, deep learning, time-series foundation models) applied to continuous series
+- **LLM Processes** — probabilistic forecasts conditioned on historical observations *and* natural language context, using the LLM itself as the forecasting engine
+- **Discrete event forecasters** — probability estimates for binary/categorical outcomes (e.g. Metaculus-style questions), treated as information retrieval and reasoning problems
 
-### Implementations Directory
+A central objective is empirical comparison across methods on shared, standardized datasets. The evaluation infrastructure is identical for backtesting and live evaluation — the same interfaces, the same scoring, the same result format.
 
-Each topic within the [choice of bootcamp/lab/workshop] has a dedicated directory in the `implementations/` directory. In each directory, there is a README file that provides an overview of the topic, prerequisites, and notebook descriptions.
+### Planned data sources
 
-Here is the list of the covered topics:
-- [Implementation 1]
-- [Implementation 2]
+- **StatCan** — Canadian macroeconomic indicators (CPI, employment, trade)
+- **FRED** — US and international macroeconomic series
+- **yfinance** — Canadian-listed equities and earnings
+- **IESO** — Ontario electricity demand and price
+- **Metaculus** — Binary and categorical forecasting questions with a Canadian focus
 
-## Getting Started
+---
 
-To get started with this bootcamp (*Change or modify the following steps based your needs.*):
-1. Clone this repository to your machine.
-2. *Include setup and installation instructions here. For additional documentation, refer to the `docs/` directory.*
-3. Begin with each topic in the `implementations/` directory, as guided by the README files.
+## Repository layout
+
+```
+aieng-forecasting/    # Installable library package (import as aieng.forecasting)
+                      # Interfaces, data layer, backtest + eval engines — core infrastructure
+
+implementations/      # Reference implementations organized by use case
+                      # Predictor examples, notebooks, experiment scripts
+
+reference_specs/      # YAML specs for canonical backtest and eval tasks
+
+scripts/              # Data population scripts (run before notebooks)
+
+planning-docs/        # Architecture decisions, project charter, planning notes
+```
+
+---
+
+## Getting started
+
+### 1. Clone and sync dependencies
+
+```bash
+git clone <repo-url>
+cd agentic-forecasting
+uv sync --group dev
+```
+
+### 2. Populate the data cache
+
+Data is fetched once and cached locally (gitignored). Run the relevant script before opening notebooks:
+
+```bash
+uv run python scripts/fetch_cpi.py   # StatCan CPI — 47 Canada-wide series
+```
+
+### 3. Open an implementation
+
+Each use case under `implementations/` has a `README.md` with a recommended learning path. The current reference implementation is **economic forecasting** (`implementations/economic_forecasting/`), which walks through CPI backtesting end-to-end.
+
+---
+
+## Core concepts
+
+**`Predictor` ABC** — the single interface all forecasting models implement, whether statistical, ML, or agentic:
+
+```python
+class MyPredictor(Predictor):
+    @property
+    def predictor_id(self) -> str:
+        return "my_predictor"
+
+    def predict(self, task: ForecastingTask, context: ForecastContext) -> Prediction:
+        series = context.get_series(task.target_series_id)  # cut off at context.as_of
+        ...
+        return Prediction(...)
+```
+
+**`ForecastContext`** — a read-only, cutoff-scoped data view passed to every predictor. All series data is automatically filtered to `context.as_of`, the forecast origin date, making information leakage structurally impossible.
+
+**Backtesting vs eval** — `backtest()` runs freely against the full historical window; `evaluate()` runs against a short protected window with a spend budget (`max_runs`). The split mirrors Kaggle's public/private leaderboard — iterate freely on backtest, spend eval runs deliberately.
+
+```python
+from aieng.forecasting.evaluation import backtest, BacktestSpec
+import yaml
+
+with open("reference_specs/cpi_allitems_12m.yaml") as f:
+    spec = BacktestSpec.model_validate(yaml.safe_load(f))
+
+result = backtest(predictor=my_predictor, spec=spec, data_service=svc)
+print(f"Mean CRPS: {result.mean_crps:.4f}")
+```
+
+---
 
 ## Code quality
 
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management. After cloning, sync dev dependencies and run the linters with:
-
 ```bash
-make dev lint
+make lint        # Full CI suite: ruff format + ruff check + mypy + pre-commit hooks
+make format      # Format only (ruff format + isort), no mypy
 ```
 
-That applies **Black** and **isort** to the repo (fixing formatting where needed), then runs **mypy** on the `aieng` package. For formatting only without mypy, use `make format`. For the full CI-style suite (ruff, nbstripout, etc.), run `uv run pre-commit run --all-files`.
+A passing `make lint` means CI will accept the code. Strict **mypy** applies to the `aieng` package; `scripts/` and `implementations/` are linted but not typechecked.
+
+---
 
 ## License
-*Add appropriate LICENSE for this bootcamp in the main directory.*
-This project is licensed under the terms of the [LICENSE](LICENSE.md) file located in the root directory of this repository.
 
-## Contribution
-*Add appropriate CONTRIBUTING.md for this bootcamp in the main directory.*
-To get started with contributing to our project, please read our [CONTRIBUTING.md](CONTRIBUTING.md) guide.
+This project is licensed under the terms of the [LICENSE](LICENSE.md) file in the root directory.
 
-## Contact Information
+## Contributing
 
-For more information or help with navigating this repository, please contact [Vector AI ENG Team/Individual] at [Contact Email].
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Contact
+
+| Contact                                  | Role/Team                         | Email                                                                                         |
+|-------------------------------------------|-----------------------------------|-----------------------------------------------------------------------------------------------|
+| Ethan Jackson                            | Technical Lead            | [ethan.jackson@vectorinstitute.ai](mailto:ethan.jackson@vectorinstitute.ai)                   |
+| Vector AI Engineering                    | Technical Team            | [ai_engineering@vectorinstitute.ai](mailto:ai_engineering@vectorinstitute.ai)                 |
+| Agentic Forecasting Bootcamp Team         | Project Team                     | [agentic-forecasting-bootcamp@vectorinstitute.ai](mailto:agentic-forecasting-bootcamp@vectorinstitute.ai) |

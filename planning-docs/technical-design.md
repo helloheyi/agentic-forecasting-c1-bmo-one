@@ -38,11 +38,40 @@ Structure:
 aieng-forecasting/aieng/forecasting/
 ├── data/                   # DataService, ForecastContext, SeriesStore, CutoffEnforcer, adapters
 │   └── adapters/           # BaseAdapter, StatCanAdapter, LocalCSVAdapter (future)
-└── evaluation/             # ForecastingTask, Predictor ABC, Prediction types, backtest engine
-    └── predictors/         # ARIMAPredictor (reference baseline)
+└── evaluation/             # ForecastingTask, Predictor ABC, Prediction types, backtest + eval engines
+    ├── backtest.py         # BacktestSpec, BacktestResult, backtest(), shared run_eval_loop + _compute_origins
+    ├── eval.py             # EvalSpec, EvalResult, EvalTracker, EvalBudgetExceededError, evaluate()
+    ├── prediction.py       # ContinuousForecast, Prediction, STANDARD_QUANTILES
+    ├── predictor.py        # Predictor ABC — the interface all forecasting models must implement
+    └── task.py             # ForecastingTask
 ```
 
+**Concrete predictor implementations do not live in this package.** The
+package exports only the `Predictor` ABC and evaluation infrastructure.
+Reference implementations of predictors live in `implementations/` alongside
+the use-case notebooks and experiments that demonstrate them.
+
 Tests mirror the package under `aieng-forecasting/tests/aieng/forecasting/`.
+
+### Implementations layer structure
+
+**Decision date:** Apr 7, 2026
+
+The `implementations/` directory is organized by **use case** at the top level. Within each use case, reference predictor implementations, notebooks, and experiment scripts live together.
+
+```
+implementations/
+└── <use-case>/           # e.g. economic_forecasting/, event_forecasting/
+    ├── README.md         # learning path, interfaces quick-reference
+    ├── predictors/       # Predictor subclasses — copy these to start your own
+    └── *.ipynb / *.py    # notebooks and experiment scripts
+```
+
+**Predictor placement rule:** A predictor implementation lives in the use-case folder where it was first built. It is lifted to a shared location only when the same implementation is needed in a second, distinct use case. Apply the same "two concrete instances before abstracting" rule used for package-level abstractions.
+
+**No mid-level `implementations/predictors/` layer** until there is a concrete duplication trigger. Creating it speculatively adds navigation overhead without benefit.
+
+**Agent backbone in the package (future):** When agentic predictors are built, the ADK agent definition, tool scaffolding, and prompt infrastructure are reusable across use cases and belong in `aieng-forecasting` (e.g. `aieng/forecasting/agents/`). The task-specific configuration and experiments using those agents live in `implementations/<use-case>/`. This is a cleaner cut than a mid-level implementations layer for that case.
 
 ### Tracing & Logging: Langfuse
 
@@ -79,7 +108,7 @@ Predictor → Prediction → Resolution → Score
 ```
 
 - **Predictor** — model-agnostic; produces a `Prediction` given a question/task and an as-of date
-- **Prediction** — paradigm-specific payload, but shares common metadata: `question_id`, `predictor_id`, `issued_at`, `horizon`
+- **Prediction** — paradigm-specific payload, but shares common metadata: `task_id`, `predictor_id`, `issued_at`, `as_of`, `forecast_date`
 - **ResolutionStore** — pre-populated in backtest mode; fills in asynchronously in live mode
 - **Scorer** — swappable: CRPS for continuous forecasts, Brier score for discrete event
 
@@ -92,7 +121,7 @@ Fields:
 - `target_series_id` — the series being forecast (key into `SeriesStore`)
 - `horizon` — number of steps ahead
 - `frequency` — temporal resolution (e.g., `"MS"` for month-start, `"h"` for hourly)
-- `resolution_fn` — how to look up ground truth from `ResolutionStore`; defaults to "observed value at the resolution timestamp"
+- `resolution_fn` — how to look up ground truth; defaults to `"observed_value_at_resolution_timestamp"`. **Currently a placeholder** — the harness always uses the default strategy regardless of this value. Dispatch on alternative strategies is deferred; the field is defined now so specs carry the intent and no breaking change is required when dispatch is added.
 - `description` — human-readable description of the task
 
 For backtesting, the harness iterates over historical origins defined by the task. For live evaluation, it waits for the resolution date. The loop is identical in both modes.
@@ -205,17 +234,75 @@ class BacktestResult(BaseModel):
     scores: list[float]         # one per forecast origin, same order
     mean_crps: float
     ran_at: datetime
+    skipped_origins: int        # origins skipped due to warmup or missing ground truth
 ```
 
-#### Build sequence for this layer
+### Eval Mode
 
-1. `ContinuousForecast` + `Prediction` models — YAML-serializable, hashable
-2. `Predictor` ABC — `predict(task, context) -> Prediction`
-3. Naive baseline predictor (Darts)
-4. `BacktestSpec` + `BacktestResult` models — interfaces before the engine
-5. `backtest()` function
-6. Reference spec YAML for CPI All-items task
-7. End-to-end run comparing two predictors
+**Decision date:** Apr 3, 2026
+
+#### Purpose
+
+Eval mode is a protected evaluation layer that sits between backtesting and true live testing. Its purpose is to estimate how well learned or tuned predictors generalise to recent, held-out data — without that held-out data becoming part of the tuning loop.
+
+The key insight: running many backtests against the full historical window is normal and expected (learning, exploration, parameter search). But peeking at the most recent data many times introduces a form of temporal leakage — each peek is a chance to implicitly over-fit to that window. Eval mode addresses this by:
+
+1. **Separating the protected window** — `EvalSpec` covers a short, recent slice that is not used for tuning. Reference eval specs are committed to `reference_specs/` and not modified by participants.
+2. **Budget-limiting access** — `EvalSpec.max_runs` caps how many times a participant may call `evaluate()` against a given spec. An `EvalTracker` (persisted to a YAML file) enforces this limit, raises `EvalBudgetExceededError` when the budget is exhausted, and records `run_number` provenance on each `EvalResult`.
+
+This is structurally analogous to Kaggle's public/private leaderboard split: use the backtest window freely, spend eval budget deliberately.
+
+#### `EvalSpec`
+
+```python
+class EvalSpec(BaseModel):
+    spec_id: str           # stable identifier; keyed by EvalTracker
+    task: ForecastingTask
+    start: datetime        # first forecast origin
+    end: datetime          # last forecast origin (inclusive)
+    stride: int = 1
+    warmup: int = 0
+    max_runs: int | None = None  # None = unlimited
+```
+
+`spec_id` is the key used by `EvalTracker` to record run history. `max_runs` encodes the intended budget directly in the spec YAML so the constraint is visible when specs are reviewed.
+
+#### `EvalTracker`
+
+A lightweight, file-backed counter. Persists to a YAML file at a caller-supplied path:
+
+```yaml
+cpi_allitems_eval_2yr:
+  runs: 2
+  last_run_at: "2026-04-03T10:00:00"
+```
+
+The tracker is user-instantiated and path-agnostic; wiring it to per-user identity (for the bootcamp leaderboard) is deferred.
+
+#### `evaluate()` function
+
+```python
+def evaluate(
+    predictor: Predictor,
+    spec: EvalSpec,
+    data_service: DataService,
+    tracker: EvalTracker | None = None,
+) -> EvalResult:
+```
+
+- Optionally checks and enforces the `max_runs` budget via `tracker`.
+- Runs the same `_run_eval_loop()` used by `backtest()`.
+- Records the run in `tracker` after success.
+- Returns `EvalResult` with `run_number` set (1 if no tracker).
+
+#### `EvalResult`
+
+Mirrors `BacktestResult` with `eval_spec: EvalSpec` instead of `spec: BacktestSpec`, plus `run_number: int` for provenance.
+
+#### Deferred
+
+- **Per-user tracking** — the tracker path is caller-supplied; binding it to a bootcamp participant identity is a future concern.
+- **Spec hash-locking** — automatic detection of spec modifications to prevent a participant from quietly expanding a protected window.
 
 ### Series Relationships
 
@@ -236,6 +323,7 @@ We follow existing standards rather than inventing new ones. For discrete event 
 
 **`Prediction` fields (metadata wrapper):**
 - `predictor_id`, `task_id`, `issued_at`, `as_of`, `forecast_date`, `payload: ContinuousForecast`
+- `metadata: dict[str, Any]` — optional, defaults to `{}`. Free-form side-channel data the predictor wants to return alongside the forecast (token counts, source lists, Langfuse trace IDs, etc.). The evaluation harness never reads or validates this field — it passes through transparently into `BacktestResult.predictions` and `EvalResult.predictions`. Anything requiring richer structure should be stored externally and referenced here by ID.
 
 ---
 
@@ -339,12 +427,14 @@ Shared abstractions are extracted after both passes are working — not designed
 
 1. ✅ `ContinuousForecast` + `Prediction` Pydantic models — YAML-serializable
 2. ✅ `Predictor` ABC — `predict(task: ForecastingTask, context: ForecastContext) -> Prediction`
-3. ✅ `ARIMAPredictor` (Darts AutoARIMA, 500 Monte Carlo samples) — first reference predictor
+3. ✅ `DartsAutoARIMAPredictor` (Darts AutoARIMA, 500 Monte Carlo samples) — first reference predictor, defined inline in `cpi_backtest_demo.ipynb` and as a standalone reference in `implementations/economic_forecasting/predictors/`
 4. ✅ `BacktestSpec` + `BacktestResult` Pydantic models
 5. ✅ `backtest()` function — iterates origins, scores with CRPS via `properscoring`
 6. ✅ `released_at` fix for StatCan CPI (21-day approximation)
 7. ✅ Reference spec YAML (`reference_specs/cpi_allitems_12m.yaml`) — Jan/Jul origins, 2000–2026
 8. ✅ Demo notebook (`implementations/economic_forecasting/cpi_backtest_demo.ipynb`)
+9. ✅ `Prediction.metadata` — optional `dict[str, Any]` escape hatch for predictor side-channel data
+10. ✅ Eval mode — `EvalSpec`, `EvalResult`, `EvalTracker`, `EvalBudgetExceededError`, `evaluate()`, reference spec `reference_specs/cpi_allitems_eval_2yr.yaml`
 
 **Next:** Second predictor variant for comparison, then Pass 2 (Metaculus / `BinaryForecast`).
 
