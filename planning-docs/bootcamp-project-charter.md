@@ -4,19 +4,20 @@
 
 This document defines the scope, methods, datasets, and design principles for the Agentic Forecasting Bootcamp. It is intended as the central technical reference for the bootcamp. The design choices reflected in this document were all informed by feedback from our industry sponsors via QSM (Quarterly Sponsor Meeting) and IAP (Industry Advisory Panel).
 
-The bootcamp is organized around three distinct approaches to forecasting applied to a focused set of Canadian finance, economics, and energy datasets. These paradigms are not mutually exclusive — the most interesting implementations may combine elements of several — but they represent meaningfully different philosophies about what a forecasting system is and how it works. A central learning objective is to compare these approaches empirically on shared, standardized datasets.
+The bootcamp is organized around four complementary approaches to forecasting applied to a focused set of finance, economics, and energy datasets. These paradigms are not mutually exclusive — the most interesting implementations combine elements of several — but they represent meaningfully different philosophies about what a forecasting system is and how it works. A central learning objective is to compare these approaches empirically on shared, standardized datasets: Canadian economic indicators via StatCan and FRED, financial markets via yfinance, energy data from NYISO, and real-world prediction questions from ForecastBench.
 
 ---
 
 ## Domain Focus
 
-The bootcamp concentrates on three interconnected domains of applied forecasting, all with strong Canadian data availability and real-world relevance to sponsor organizations:
+The bootcamp concentrates on three interconnected domains of applied forecasting, all with strong real-world relevance to sponsor organizations:
 
-* **Finance** — equities, earnings, and foreign exchange (e.g., yfinance, SEDAR+)
+* **Finance** — equities, earnings, and foreign exchange (e.g., yfinance)
 * **Economics** — macroeconomic indicator forecasting (e.g., StatCan, Bank of Canada)
-* **Energy** — electricity demand and price forecasting (e.g., Ontario grid via IESO)
+* **Energy** — electricity demand and price forecasting (e.g., NYISO, Ontario grid via IESO)
+* **World Events** — predicting resolutions to broad questions of global importance (e.g., Metaculus, ForecastBench)
 
-Focusing on these domains allows participants to go deeper on techniques rather than wider on coverage. The target datasets are standardized; the forecasting tasks and questions framed against them are not — there are many meaningful ways to frame prediction problems in each domain, and the diversity of task framings is itself a learning objective. Additional data sources (e.g. datasets, APIs, or agentic tools) may be used to provide covariates or context.
+Focusing on these domains allows participants to go deeper on techniques rather than wider on coverage. These datasets are rich enough to support a wide range of meaningful experiments and use cases — participants can draw on the same data sources for continuous forecasting, binary event prediction, and everything in between.
 
 ---
 
@@ -26,7 +27,7 @@ Two design principles apply across all methods and datasets in the bootcamp. The
 
 ### LLM-Assisted Coding and Optimization
 
-Using an LLM to help write, debug, tune, and iterate on any of the three forecasting approaches is not a fourth paradigm — it is a design practice that applies on top of all of them. A well-implemented, AI-assisted statistical or ML model may be a considerably stronger baseline than a hastily-coded one, and exploring this systematically is a legitimate direction in its own right. We will consult with AI Engineering to determine what tools could be available during a bootcamp for AI assisted coding. For example, simply supporting the use of GitHub Copilot via the Coder/VSCode interface or supporing Cursor (which is enabled/possible using the Coder platform), may be good enough.
+Using an LLM to help write, debug, tune, and iterate on any forecasting implementation is not a separate paradigm — it is a design practice that applies on top of all of them. Participants are encouraged to use tools like Cursor or GitHub Copilot throughout the bootcamp.
 
 ### Transparency, Interpretability, and Explainability
 
@@ -44,6 +45,8 @@ These three lenses will be applied throughout the bootcamp as we evaluate and co
 
 ## Forecasting Methods
 
+The methods in this bootcamp span a spectrum from well-established statistical baselines to frontier agentic systems. Understanding this spectrum is itself a learning objective: each paradigm has characteristic strengths, failure modes, and interpretability properties, and the relationships between them are not static — the most capable systems we can build borrow from all of them.
+
 ### 1\. Numerical Forecasters
 
 The established paradigm: a model is trained on historical data and produces predictions from learned statistical or structural patterns. This family spans a wide range of complexity, from interpretable classical models to large pre-trained foundation models, but shares a common assumption: that the signal needed to forecast is latent in the historical data itself.
@@ -53,7 +56,7 @@ The established paradigm: a model is trained on historical data and produces pre
 * **Deep learning models** — LSTM, Temporal Fusion Transformer (Lim et al., 2021), N-BEATS (Oreshkin et al., 2019). Better at learning complex temporal dependencies from large datasets.
 * **Time series foundation models** — pre-trained models such as TimesFM and Chronos that generalize across domains in a zero-shot or few-shot setting. A rapidly developing area as of 2024–2025.
 
-Numerical forecasters serve as the baseline for all tracks. They are the standard against which LLM-based approaches are evaluated, and they are often surprisingly hard to beat — particularly when built and tuned carefully.
+Numerical forecasters are the baselines for most tracks — often surprisingly hard to beat when built and tuned carefully. They are the standard against which LLM-based methods are evaluated. They also play a second role in this bootcamp: as **composable capabilities** that a more capable forecasting agent can invoke as tools or with agent skills.
 
 ---
 
@@ -65,14 +68,22 @@ The key insight is that LLMs encode rich prior knowledge about the world — dom
 
 This paradigm is particularly well-suited to domains where current events, policy announcements, and qualitative context materially affect outcomes — precisely the conditions that characterize energy markets, macroeconomic indicators, and equities. LLMPs have been shown to be competitive with Gaussian Processes and other probabilistic regressors in zero-shot settings, with well-calibrated uncertainty, and apply naturally to settings with structural breaks or regime changes.
 
+The LLMP is the most constrained form of LLM-based forecasting — a well-specified function call rather than a reasoning agent. It is the natural baseline from which more capable agentic forecasters should demonstrate measurable improvement.
+
 Requeima, J., Bronskill, J., Choi, D., Turner, R. E., & Duvenaud, D. (2024). LLM Processes: Numerical Predictive Distributions Conditioned on Natural Language. *NeurIPS 2024*. arXiv:2405.12856.
 
 
-### 2.1\. Hybrid Approaches
+### 2.1\. Frontier Agentic Forecasters
 
-We can consider different ways to combine numerical methods with LLM processes. For instance, we can explore the idea that numerical forecasts could be used as an *input* into an LLM process, along with other sources of information. This way a forecasting agent could go through a workflow such as: "What would it look like if I used ARIMA / ETS to generate a forecast? Is there anything happening in the news that would make me want to modify this? After doing some investigation and analysis, which could include writing and executing code, what is my final prediction? How confident am I about it?"
+The LLM Process is a stepping stone toward a more capable paradigm: a **frontier agentic forecaster** that uses an LLM not as a constrained inference function but as the reasoning core of an autonomous agent. Where an LLMP receives a fixed prompt and returns a distribution, a frontier agent can take actions — running code, calling APIs, retrieving news and policy context, and invoking numerical forecasting routines — before synthesizing the results into a final prediction.
 
-In other words, this kind of approach could look at numerical forecasting as just another type of activity that a forecasting agent is able to perform before issuing its "final" prediction. This opens the door to a wide variety of toolsets, agent skills, code gen/exec. We also open the door to agent search techniques like ADAS, DGM, or the new Hyperagents. We'll have to think of what the right way to organize this is. A "hybrid" forecaster could be, at the end of the day, a forecasting agent that has abilities above and beyond a more contrained LLMP pipeline.
+This represents a fundamental reconceptualization of the relationship between LLMs and numerical methods. Rather than treating numerical forecasters purely as baselines that LLMs try to beat, a frontier agent may invoke ARIMA, N-BEATS, or a foundation model as a **skill** — one analytical capability among several — then use reasoning to combine those outputs with qualitative context, live data, and accumulated experience.
+
+The most capable agent we can envision looks something like this: given a forecasting task, the agent decides what analyses to run, executes code to produce one or more numerical forecasts, retrieves relevant news and policy signals, weighs the evidence, and produces a calibrated prediction with a clear rationale and cited sources. This kind of system is not a fixed pipeline — it is a configurable architecture that bootcamp participants are explicitly invited to explore and extend.
+
+The bootcamp platform is built to support two complementary dimensions of comparison:
+1. **Independent method evaluation** — each paradigm applied to the same reference tasks, with standardized evaluation metrics, so numerical, LLMP, and agentic approaches can be directly ranked.
+2. **Agent capability exploration** — how do additional tools, code execution, information retrieval, or accumulated experience change a forecasting agent's performance and calibration?
 
 ### 3\. Discrete Event Forecasters
 
@@ -110,7 +121,7 @@ Macroeconomic indicators from Statistics Canada (CPI, employment, trade) alongsi
 
 ### Equities / Earnings — yfinance
 
-Canadian-listed equities and earnings data sourced via yfinance. This track supports the full range of forecasting paradigms and naturally accommodates both continuous forecasting (price direction, return distribution) and discrete event framing (earnings beats, threshold crossings).
+Equities and earnings data sourced via yfinance. This track supports the full range of forecasting paradigms and naturally accommodates both continuous forecasting (price direction, return distribution) and discrete event framing (earnings beats, threshold crossings).
 
 ### ForecastBench — Discrete Event Forecasting Questions
 
@@ -128,12 +139,12 @@ This track is the primary venue for discrete event forecasting and the connectio
 
 Not every method applies equally well to every dataset. The table below indicates which reference implementations are applicable to each dataset, and serves as a guide for participants choosing their track and approach.
 
-| Dataset | Numerical Forecasters | LLM Processes | Discrete Event Forecasters |
-| :---- | :---: | :---: | :---: |
-| **NYISO** (New York electricity grid) | ✅ | ✅ | ◑ |
-| **Canadian Economic Vitals** (StatCan \+ FRED) | ✅ | ✅ | ◑ |
-| **Equities / Earnings** (yfinance) | ✅ | ✅ | ✅ |
-| **ForecastBench** (discrete event questions, Canadian lens) | — | — | ✅ |
+| Dataset | Numerical Forecasters | LLM Processes | Frontier Agentic | Discrete Event Forecasters |
+| :---- | :---: | :---: | :---: | :---: |
+| **NYISO** (New York electricity grid) | ✅ | ✅ | ✅ | ◑ |
+| **Canadian Economic Vitals** (StatCan \+ FRED) | ✅ | ✅ | ✅ | ◑ |
+| **Equities / Earnings** (yfinance) | ✅ | ✅ | ✅ | ✅ |
+| **ForecastBench** (discrete event questions, Canadian lens) | — | — | ✅ | ✅ |
 
 **Key**
 ✅ Applies naturally to the canonical task
@@ -150,23 +161,26 @@ Not every method applies equally well to every dataset. The table below indicate
 
 * *Numerical:* Forecast hourly New York electricity demand or day-ahead LBMP price for the next 24 hours across load zones
 * *LLM Processes:* Forecast demand conditioned on weather narrative, day-of-week context, and known grid events
+* *Frontier Agentic:* Agent retrieves real-time weather forecasts and grid news, runs a numerical baseline, then synthesizes a calibrated demand or price distribution with a written rationale
 * *Discrete Event (◑):* "Will New York peak demand exceed X MW tomorrow?" or "Will day-ahead prices exceed $100/MWh during the 5–7pm window?"
 
 **Canadian Economic Vitals — StatCan \+ FRED**
 
 * *Numerical:* Forecast next StatCan CPI release value using VAR model on basket series; forecast next-day CAD/USD using ARIMA
 * *LLM Processes:* Forecast CPI conditioned on recent policy announcements, commodity price movements, and trade context in natural language
+* *Frontier Agentic:* Agent runs a numerical CPI forecast, retrieves recent BoC statements and commodity news, then adjusts the prediction based on qualitative signals and produces a calibrated estimate with cited sources
 * *Discrete Event (◑):* "Will the next food CPI release show an increase greater than 0.3%?" or "Will CAD/USD close above 0.72 on Friday?"
 
 **Equities / Earnings — yfinance**
 
 * *Numerical:* Forecast 30-day price direction or return distribution using historical OHLCV data
 * *LLM Processes:* Forecast price conditioned on earnings transcript sentiment, analyst consensus, and macro context
+* *Frontier Agentic:* Agent retrieves recent earnings commentary and analyst reports, runs a quantitative model on historical data, and combines both sources into a calibrated return distribution or event probability
 * *Discrete Event (✅):* "Will this company beat earnings consensus next quarter?" or "Will this stock be up more than 5% in the 30 days following the earnings release?"
 
 **ForecastBench — discrete event questions (Canadian lens)**
 
-* *Discrete Event (✅):* Forecast the probability of binary questions resolving positively — e.g. "Will the Bank of Canada cut rates at its next announcement?" or "Will Canada's unemployment rate exceed 7% by end of Q2?" Historical ForecastBench questions and resolutions can also be used to backtest discrete event predictors end-to-end without requiring live question access.
+* *Frontier Agentic / Discrete Event (✅):* Forecast the probability of binary questions resolving positively — e.g. "Will the Bank of Canada cut rates at its next announcement?" or "Will Canada's unemployment rate exceed 7% by end of Q2?" The agent retrieves relevant news, searches historical base rates, reasons step-by-step, and produces a probability with an explicit evidence chain. Historical ForecastBench questions and resolutions can also be used to backtest discrete event predictors end-to-end without requiring live question access.
 
 ---
 
