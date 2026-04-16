@@ -517,7 +517,7 @@ Shared abstractions are extracted after both passes are working — not designed
 14. ✅ `MultiTargetEvalSpec` + `multi_evaluate()` — budget-limited multi-target eval; single call costs one budget run; in `eval.py`
 15. ✅ `FREDAdapter` — fetches any FRED series via `fredapi`; `released_at = timestamp`; API key from `FRED_API_KEY` env var; in `data/adapters/fred.py`
 16. ✅ `scripts/fetch_fred.py` — populates 7 FRED covariate series for the food price experiment
-17. ✅ `DartsAutoARIMAPredictor` moved to `implementations/methods/darts_arima.py` with optional `covariate_series_ids` support
+17. ✅ `DartsAutoARIMAPredictor` in `implementations/methods/darts_arima.py` — univariate Darts `AutoARIMA` only (no exogenous covariate parameters; the underlying model does not accept `past_covariates` in this stack)
 18. ✅ CFPR / food price experiment — `implementations/experiments/food_price_forecasting/` with README, exploration notebook, 18m and 3m experiment notebooks
 19. ✅ Reference specs for food CPI — `reference_specs/food_cpi/` (4 YAML files: 18m + 3m × backtest + eval)
 

@@ -15,7 +15,7 @@
 
 **Methods: `DartsAutoARIMAPredictor` promoted to shared module**
 - Moved from an inline notebook definition to `implementations/methods/darts_arima.py`.
-- Extended with optional `covariate_series_ids: list[str]`; when provided the predictor fetches those series from `ForecastContext`, aligns them to the target grid, and passes them as `past_covariates` to Darts `AutoARIMA`.
+- Univariate only: Darts `AutoARIMA` in this stack does not accept `past_covariates` on `fit`/`predict`, so the predictor exposes no covariate parameters.
 - `cpi_backtest_demo.ipynb` updated to import from the new module.
 
 **Reference specs: `reference_specs/food_cpi/`**
@@ -25,7 +25,7 @@
 
 **Experiment notebooks: `implementations/experiments/food_price_forecasting/`**
 - `food_data_exploration.ipynb`: registers all StatCan food CPI series and FRED covariates, inspects date ranges, plots historical series, computes cross-correlations.
-- `food_cpi_18m_experiment.ipynb`: `multi_backtest` over 18-month horizon for `LastValuePredictor` and `DartsAutoARIMAPredictor` (with and without covariates); CRPS comparison table; post-hoc MAPE computed from median forecast; `multi_evaluate` against `food_cpi_18m_eval.yaml`; YoY % change derivation.
+- `food_cpi_18m_experiment.ipynb`: `multi_backtest` over 18-month horizon for `LastValuePredictor` and univariate `DartsAutoARIMAPredictor`; CRPS comparison table; post-hoc MAPE computed from median forecast; `multi_evaluate` against `food_cpi_18m_eval.yaml`; YoY % change derivation.
 - `food_cpi_3m_experiment.ipynb`: same structure at 3-month horizon; section contrasting eval-density advantage over the 18-month experiment.
 
 ### Key decisions

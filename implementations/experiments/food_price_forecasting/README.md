@@ -28,7 +28,7 @@ This use case replicates and extends the **Canada's Food Price Report (CFPR)** f
 
 ## Exogenous Covariates (FRED)
 
-The following FRED series can be used as past covariates by predictors that support them (e.g. `DartsAutoARIMAPredictor(covariate_series_ids=[...])`). Populated via `scripts/fetch_fred.py`.
+The following FRED series are registered for exploration and for any custom predictor that consumes exogenous series from `ForecastContext`. Populated via `scripts/fetch_fred.py`. The reference `DartsAutoARIMAPredictor` is univariate only.
 
 | Series ID | FRED ID | Description |
 |-----------|---------|-------------|
@@ -110,4 +110,4 @@ uv run python scripts/fetch_fred.py   # requires FRED_API_KEY in .env
 - **Forecast target is the raw CPI index.** Year-over-year percentage changes are derived at reporting time: `yoy_pct = (forecast - actual_12m_ago) / actual_12m_ago * 100`. This keeps the modelling target straightforward and separable from the reporting presentation.
 - **No ensemble model selection.** We compare individual methods on CRPS + MAPE (median). Ensemble search is out of scope for this iteration.
 - **MAPE on median.** MAPE is computed post-hoc in notebooks using `prediction.payload.point_forecast` (the median of the predictive distribution). It is not part of `BacktestResult`/`EvalResult`; the primary metric is CRPS.
-- **Covariates are predictor-level.** Which FRED series to include is a predictor decision (`covariate_series_ids`), not a task definition. Tasks define the question; predictors decide how to answer it.
+- **Exogenous inputs are predictor-level.** Whether and how to use FRED or other series is a predictor implementation choice, not a task definition. Tasks define the question; predictors decide how to answer it.
