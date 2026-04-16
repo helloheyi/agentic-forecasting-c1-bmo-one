@@ -334,6 +334,34 @@ Mirrors `BacktestResult` with `eval_spec: EvalSpec` instead of `spec: BacktestSp
 - **Per-user tracking** — the tracker path is caller-supplied; binding it to a bootcamp participant identity is a future concern.
 - **Spec hash-locking** — automatic detection of spec modifications to prevent a participant from quietly expanding a protected window.
 
+### Multi-Target Evaluation
+
+**Decision date:** Apr 16, 2026
+
+`MultiTargetBacktestSpec` and `MultiTargetEvalSpec` allow a predictor to be evaluated across a collection of related `ForecastingTask` objects under identical window parameters (shared `start`, `end`, `stride`, `warmup`). The primary use case is evaluating all food CPI sub-categories simultaneously.
+
+All tasks in a multi-target spec must share the same `frequency` — enforced at construction time.
+
+```python
+class MultiTargetBacktestSpec(BaseModel):
+    tasks: list[ForecastingTask]   # all must share the same frequency
+    start: datetime
+    end: datetime
+    stride: int = 1
+    warmup: int = 0
+    def specs(self) -> list[BacktestSpec]: ...
+
+def multi_backtest(
+    predictor: Predictor,
+    spec: MultiTargetBacktestSpec,
+    data_service: DataService,
+) -> dict[str, BacktestResult]: ...  # keyed by task_id
+```
+
+`MultiTargetEvalSpec` mirrors `EvalSpec` with an additional `tasks` list instead of a single `task`. It adds `spec_id` and `max_runs` for budget control. **Budget semantics:** one call to `multi_evaluate()` consumes one run against `max_runs` regardless of how many tasks are included — the budget governs evaluation *sessions*, not individual series.
+
+Reference multi-target specs live in `reference_specs/food_cpi/`.
+
 ### Series Relationships
 
 Which series are meaningfully related (e.g., CPI sub-components, related equity indicators) is captured in **dataset documentation and configuration files**, not in the data service itself. Predictors discover and request related series by consulting that documentation or by their own design. A formal global registry is not needed at the scale we're operating at, and is explicitly deferred.
@@ -386,7 +414,7 @@ DataService                  # registration + management layer (scripts, noteboo
     ├── BaseAdapter          # protocol / ABC all adapters must implement             │
     ├── LocalCSVAdapter      # first-class path for custom datasets (planned)         │
     ├── StatCanAdapter       # ✅ implemented                                         │
-    ├── FREDAdapter          # planned                                                │
+    ├── FREDAdapter          # ✅ implemented                                          │
     ├── yfinanceAdapter      # planned                                                │
     └── NYISOAdapter         # planned — CSV download, hourly load/price data         │
                                                                                       │
@@ -403,7 +431,7 @@ The following datasets are confirmed for the bootcamp. Access conditions and int
 | Dataset | Access Method | License / Conditions | Adapter Status | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Statistics Canada** | `stats-can` Python library / SDMX API | Open Government Licence (no conditions) | ✅ `StatCanAdapter` | `released_at` approximated as `timestamp + 21 days` |
-| **FRED** | REST API with key | Attribution required; API key needed | Planned `FREDAdapter` | Used for US and international macro series |
+| **FRED** | REST API with key | Attribution required; API key needed | ✅ `FREDAdapter` | `released_at = timestamp` (no vintage dates via `fredapi`); API key from `FRED_API_KEY` env var |
 | **yfinance** | Python SDK | Attribution required; rate-limited | Planned `yfinanceAdapter` | Suitability for bulk backtesting (vs. real-time) still under evaluation |
 | **NYISO** | CSV download | No conditions apparent on data files | Planned `NYISOAdapter` | 5-minute granularity, ~11 load zones; task framing TBD |
 | **ForecastBench** | Direct download (site + GitHub) | CC-BY-SA-4.0 — attribution required | Separate integration (Pass 2) | Supersedes direct Metaculus API integration; includes Metaculus + FRED + Yahoo Finance + Rand questions, historical resolutions, and community predictions |
@@ -484,6 +512,14 @@ Shared abstractions are extracted after both passes are working — not designed
 10. ✅ Eval mode — `EvalSpec`, `EvalResult`, `EvalTracker`, `EvalBudgetExceededError`, `evaluate()`, reference spec `reference_specs/cpi_allitems_eval_2yr.yaml`
 11. ✅ `LastValuePredictor` — naive last-value baseline in `implementations/methods/naive.py`; first method in the importable `methods` package; also the annotated `Predictor` interface reference
 12. ✅ Two-predictor comparison in demo notebook — `LastValuePredictor` vs `DartsAutoARIMAPredictor` on `cpi_allitems_12m`, with per-origin CRPS table and comparison chart
+
+13. ✅ `MultiTargetBacktestSpec` + `multi_backtest()` — evaluate one predictor across many tasks with a shared window; in `backtest.py`
+14. ✅ `MultiTargetEvalSpec` + `multi_evaluate()` — budget-limited multi-target eval; single call costs one budget run; in `eval.py`
+15. ✅ `FREDAdapter` — fetches any FRED series via `fredapi`; `released_at = timestamp`; API key from `FRED_API_KEY` env var; in `data/adapters/fred.py`
+16. ✅ `scripts/fetch_fred.py` — populates 7 FRED covariate series for the food price experiment
+17. ✅ `DartsAutoARIMAPredictor` moved to `implementations/methods/darts_arima.py` with optional `covariate_series_ids` support
+18. ✅ CFPR / food price experiment — `implementations/experiments/food_price_forecasting/` with README, exploration notebook, 18m and 3m experiment notebooks
+19. ✅ Reference specs for food CPI — `reference_specs/food_cpi/` (4 YAML files: 18m + 3m × backtest + eval)
 
 **Next:** Pass 2 (ForecastBench discrete event questions / `BinaryForecast` / BoC reference experiment); see backlog T4. Also: expand `methods/` with `SeasonalNaivePredictor`, a second Darts model, and a foundation model predictor (T3).
 

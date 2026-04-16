@@ -1,0 +1,111 @@
+# Reference MultiTargetBacktestSpec: Canada Food CPI, 3-month ahead forecast
+#
+# Evaluates predictors quarterly (every 3 months) from 2000 to present across
+# all 9 food CPI categories.
+#
+# Design rationale
+# ----------------
+# The 3-month horizon is a companion to the 18-month CFPR experiment.
+# Shorter horizon → more resolved origins → more eval data points without
+# pushing the eval window far into the past.  The 3-month experiment is
+# particularly useful for:
+#
+#   1. Denser evaluation: ~9 resolvable eval origins (vs ~5 at 18m) in the
+#      same recent calendar span.
+#   2. Method discrimination: differences between predictors are clearer at
+#      shorter horizons where signal-to-noise is higher.
+#   3. Calibration baseline: 3m forecasts can be chained or compared against
+#      the 18m results to understand how forecast skill degrades with horizon.
+#
+# Prerequisites:
+#   uv run python scripts/fetch_cpi.py   # populate StatCan food CPI cache
+#
+# To load this spec in Python:
+#
+#   import yaml
+#   from aieng.forecasting.evaluation import MultiTargetBacktestSpec
+#
+#   with open("reference_specs/food_cpi/food_cpi_3m_backtest.yaml") as f:
+#       spec = MultiTargetBacktestSpec.model_validate(yaml.safe_load(f))
+
+tasks:
+  - task_id: food_cpi_overall_3m
+    target_series_id: cpi_food_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Food (overall food index, 2002=100) exactly 3
+      months ahead of the forecast origin.
+
+  - task_id: food_cpi_bakery_cereal_3m
+    target_series_id: cpi_bakery_cereal_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Bakery and cereal products (excl. baby food,
+      2002=100) exactly 3 months ahead.
+
+  - task_id: food_cpi_dairy_eggs_3m
+    target_series_id: cpi_dairy_eggs_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Dairy products and eggs (2002=100) exactly 3
+      months ahead.
+
+  - task_id: food_cpi_fish_seafood_3m
+    target_series_id: cpi_fish_seafood_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Fish, seafood and other marine products
+      (2002=100) exactly 3 months ahead.
+
+  - task_id: food_cpi_restaurants_3m
+    target_series_id: cpi_restaurants_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Food purchased from restaurants (2002=100)
+      exactly 3 months ahead.
+
+  - task_id: food_cpi_fruit_preparations_nuts_3m
+    target_series_id: cpi_fruit_preparations_nuts_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Fruit, fruit preparations and nuts (2002=100)
+      exactly 3 months ahead.
+
+  - task_id: food_cpi_meat_3m
+    target_series_id: cpi_meat_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Meat (2002=100) exactly 3 months ahead.
+
+  - task_id: food_cpi_other_food_3m
+    target_series_id: cpi_other_food_nonalcoholic_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Other food products and non-alcoholic beverages
+      (2002=100) exactly 3 months ahead.
+
+  - task_id: food_cpi_vegetables_3m
+    target_series_id: cpi_vegetables_preparations_canada
+    horizon: 3
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Vegetables and vegetable preparations (2002=100)
+      exactly 3 months ahead.
+
+# Backtest window: January 2000 through January 2026.
+start: "2000-01-01"
+end: "2026-01-01"
+
+# stride=3 gives quarterly origins (Jan, Apr, Jul, Oct).
+stride: 3
+
+# Require 24 months of history before the first forecast origin.
+warmup: 24

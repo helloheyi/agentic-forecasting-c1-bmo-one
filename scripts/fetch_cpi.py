@@ -103,9 +103,33 @@ CPI_SERIES: list[tuple[str, str, str, str]] = [
         "Index 2002=100",
     ),
     (
+        "cpi_fruit_preparations_nuts_canada",
+        "Fruit, fruit preparations and nuts",
+        "CPI Fruit, fruit preparations and nuts, Canada (2002=100)",
+        "Index 2002=100",
+    ),
+    (
         "cpi_fresh_vegetables_canada",
         "Fresh vegetables",
         "CPI Fresh vegetables, Canada (2002=100)",
+        "Index 2002=100",
+    ),
+    (
+        "cpi_vegetables_preparations_canada",
+        "Vegetables and vegetable preparations",
+        "CPI Vegetables and vegetable preparations, Canada (2002=100)",
+        "Index 2002=100",
+    ),
+    (
+        "cpi_fish_seafood_canada",
+        "Fish, seafood and other marine products",
+        "CPI Fish, seafood and other marine products, Canada (2002=100)",
+        "Index 2002=100",
+    ),
+    (
+        "cpi_other_food_nonalcoholic_canada",
+        "Other food products and non-alcoholic beverages",
+        "CPI Other food products and non-alcoholic beverages, Canada (2002=100)",
         "Index 2002=100",
     ),
     (

@@ -14,6 +14,11 @@ differences from a backtest are:
   before the run and the counter is incremented on success.  This prevents
   inadvertent over-fitting to the held-out window.
 
+This module also provides :class:`MultiTargetEvalSpec` and
+:func:`multi_evaluate` for evaluating a predictor across multiple related tasks
+under a single shared budget.  A single ``multi_evaluate`` call counts as one
+run against the budget regardless of how many tasks are included.
+
 Intended usage in a bootcamp session::
 
     import yaml
@@ -405,3 +410,201 @@ def evaluate(
         skipped_origins=skipped,
         run_number=runs_used + 1,
     )
+
+
+# ---------------------------------------------------------------------------
+# MultiTargetEvalSpec and multi_evaluate()  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+
+class MultiTargetEvalSpec(BaseModel):
+    """Eval spec that assesses a predictor across multiple related tasks.
+
+    ``MultiTargetEvalSpec`` is the eval-mode counterpart to
+    :class:`~aieng.forecasting.evaluation.backtest.MultiTargetBacktestSpec`.
+    It groups several :class:`ForecastingTask` objects under a single shared
+    evaluation window and a single run budget.
+
+    **Budget semantics:** One call to :func:`multi_evaluate` counts as *one*
+    run against ``max_runs``, regardless of how many tasks are included.  This
+    means the budget governs "evaluation sessions", not individual series.
+
+    All tasks must share the same ``frequency``; this is enforced at
+    construction time.
+
+    Parameters
+    ----------
+    spec_id : str
+        Stable identifier for this spec, used by :class:`EvalTracker` to key
+        run counts.  Should be unique across all spec files.
+    tasks : list[ForecastingTask]
+        The prediction problems to evaluate.  All must share the same
+        ``frequency``.
+    start : datetime
+        First candidate forecast origin.
+    end : datetime
+        Last candidate forecast origin (inclusive).
+    stride : int
+        Step size between origins in task-frequency units.
+    warmup : int
+        Minimum observations required before a forecast origin is used.
+    max_runs : int or None
+        Maximum number of ``multi_evaluate`` calls allowed (per tracker).
+        ``None`` means unlimited.
+
+    Examples
+    --------
+    >>> spec = MultiTargetEvalSpec(
+    ...     spec_id="food_cpi_18m_eval",
+    ...     tasks=[task_food, task_meat, task_dairy],
+    ...     start=datetime(2022, 7, 1),
+    ...     end=datetime(2024, 7, 1),
+    ...     stride=6,
+    ...     warmup=24,
+    ...     max_runs=5,
+    ... )
+    """
+
+    spec_id: str = Field(description="Stable identifier for tracking; keyed by EvalTracker.")
+    tasks: list[ForecastingTask] = Field(min_length=1, description="Prediction problems; all must share the same frequency.")
+    start: datetime = Field(description="First candidate forecast origin.")
+    end: datetime = Field(description="Last candidate forecast origin (inclusive).")
+    stride: int = Field(default=1, ge=1, description="Step size between origins in task-frequency units.")
+    warmup: int = Field(default=0, ge=0, description="Minimum observations required before first forecast.")
+    max_runs: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum allowed evaluation sessions against this spec (per tracker). None = unlimited.",
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> "MultiTargetEvalSpec":
+        if self.start >= self.end:
+            raise ValueError(f"start ({self.start}) must be before end ({self.end})")
+        frequencies = {t.frequency for t in self.tasks}
+        if len(frequencies) > 1:
+            raise ValueError(
+                f"All tasks in a MultiTargetEvalSpec must share the same frequency. "
+                f"Found: {sorted(frequencies)}"
+            )
+        return self
+
+    def specs(self) -> list[EvalSpec]:
+        """Decompose into one :class:`EvalSpec` per task.
+
+        The individual specs share ``spec_id`` and window parameters.  They are
+        intended for internal use by :func:`multi_evaluate` — the budget is
+        enforced once at the multi-target level, not per task.
+
+        Returns
+        -------
+        list[EvalSpec]
+            One spec per task, sharing ``spec_id``, window, and budget fields.
+        """
+        return [
+            EvalSpec(
+                spec_id=self.spec_id,
+                task=t,
+                start=self.start,
+                end=self.end,
+                stride=self.stride,
+                warmup=self.warmup,
+                max_runs=self.max_runs,
+            )
+            for t in self.tasks
+        ]
+
+
+def multi_evaluate(
+    predictor: Predictor,
+    spec: MultiTargetEvalSpec,
+    data_service: DataService,
+    tracker: EvalTracker | None = None,
+) -> dict[str, EvalResult]:
+    """Run an evaluation of a predictor across all tasks in a MultiTargetEvalSpec.
+
+    The budget check and tracker increment happen *once* for the entire
+    multi-target evaluation — one call counts as one run regardless of how
+    many tasks are in the spec.  All tasks then run using the same
+    underlying :func:`evaluate`-level loop, but without re-checking the budget
+    for each individual task.
+
+    Parameters
+    ----------
+    predictor : Predictor
+        The forecasting model to evaluate.
+    spec : MultiTargetEvalSpec
+        Defines the tasks, shared evaluation window, stride, warmup, and
+        optional run budget.
+    data_service : DataService
+        Pre-populated data service.  Must have all target series registered.
+    tracker : EvalTracker or None
+        Optional tracker for budget enforcement and run-count provenance.
+        If ``None``, runs unconditionally and ``run_number`` is 1 on all results.
+
+    Returns
+    -------
+    dict[str, EvalResult]
+        Eval results keyed by ``task_id``, one entry per task.
+
+    Raises
+    ------
+    EvalBudgetExceededError
+        If ``tracker`` is provided, ``spec.max_runs`` is set, and the budget
+        has been exhausted.
+    KeyError
+        If any target series is not registered in the data service.
+    ValueError
+        If no origins can be scored for any task.
+
+    Examples
+    --------
+    >>> results = multi_evaluate(predictor=my_predictor, spec=spec, data_service=svc, tracker=tracker)
+    >>> for task_id, result in results.items():
+    ...     print(f"{task_id}: mean CRPS = {result.mean_crps:.4f}  (run {result.run_number})")
+    """
+    runs_used = tracker.runs_for(spec.spec_id) if tracker is not None else 0
+
+    if tracker is not None and spec.max_runs is not None and runs_used >= spec.max_runs:
+        raise EvalBudgetExceededError(
+            spec_id=spec.spec_id,
+            runs_used=runs_used,
+            max_runs=spec.max_runs,
+        )
+
+    ran_at = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+    run_number = runs_used + 1
+
+    results: dict[str, EvalResult] = {}
+    for task in spec.tasks:
+        predictions, scores, skipped = run_eval_loop(
+            predictor=predictor,
+            task=task,
+            origins=_compute_origins(spec.start, spec.end, task.frequency, spec.stride),
+            warmup=spec.warmup,
+            data_service=data_service,
+        )
+        task_eval_spec = EvalSpec(
+            spec_id=spec.spec_id,
+            task=task,
+            start=spec.start,
+            end=spec.end,
+            stride=spec.stride,
+            warmup=spec.warmup,
+            max_runs=spec.max_runs,
+        )
+        results[task.task_id] = EvalResult(
+            eval_spec=task_eval_spec,
+            predictor_id=predictor.predictor_id,
+            predictions=predictions,
+            scores=scores,
+            mean_crps=float(np.mean(scores)),
+            ran_at=ran_at,
+            skipped_origins=skipped,
+            run_number=run_number,
+        )
+
+    if tracker is not None:
+        tracker.record(spec.spec_id, ran_at)
+
+    return results

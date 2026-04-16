@@ -1,0 +1,116 @@
+# Reference MultiTargetEvalSpec: Canada Food CPI, 18-month ahead — protected eval window
+#
+# This spec covers a recent held-out window (Jul 2022 → Jul 2024) for
+# estimating how well backtested predictors generalise at the 18-month horizon.
+#
+# Design rationale
+# ----------------
+# At an 18-month horizon and 6-month stride, this window yields ~5 resolvable
+# origins (Jul 2022, Jan 2023, Jul 2023, Jan 2024, Jul 2024).  Each origin
+# resolves 18 months later: Jul 2024 resolves Jan 2026, which is available as
+# of the StatCan release ~Feb 2026.  Origins after Jul 2024 resolve in
+# mid-to-late 2026 and are not yet available.
+#
+# Budget semantics
+# ----------------
+# One call to multi_evaluate() counts as ONE run against max_runs regardless of
+# how many food categories are included.  This governs "evaluation sessions",
+# not individual series.  Use the backtest spec (food_cpi_18m_backtest.yaml)
+# freely for learning and tuning; spend this budget deliberately.
+#
+# To load this spec in Python:
+#
+#   import yaml
+#   from pathlib import Path
+#   from aieng.forecasting.evaluation import MultiTargetEvalSpec, EvalTracker, multi_evaluate
+#
+#   with open("reference_specs/food_cpi/food_cpi_18m_eval.yaml") as f:
+#       spec = MultiTargetEvalSpec.model_validate(yaml.safe_load(f))
+#
+#   tracker = EvalTracker(Path("eval_runs.yaml"))
+#   results = multi_evaluate(predictor=my_predictor, spec=spec, data_service=svc, tracker=tracker)
+#   for task_id, result in results.items():
+#       print(f"{task_id}: mean CRPS = {result.mean_crps:.4f}  (run {result.run_number}/{spec.max_runs})")
+
+spec_id: food_cpi_18m_eval
+
+tasks:
+  - task_id: food_cpi_overall_18m
+    target_series_id: cpi_food_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Food (overall food index, 2002=100) exactly 18
+      months ahead of the forecast origin.
+
+  - task_id: food_cpi_bakery_cereal_18m
+    target_series_id: cpi_bakery_cereal_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Bakery and cereal products (excl. baby food,
+      2002=100) exactly 18 months ahead.
+
+  - task_id: food_cpi_dairy_eggs_18m
+    target_series_id: cpi_dairy_eggs_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Dairy products and eggs (2002=100) exactly 18
+      months ahead.
+
+  - task_id: food_cpi_fish_seafood_18m
+    target_series_id: cpi_fish_seafood_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Fish, seafood and other marine products
+      (2002=100) exactly 18 months ahead.
+
+  - task_id: food_cpi_restaurants_18m
+    target_series_id: cpi_restaurants_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Food purchased from restaurants (2002=100)
+      exactly 18 months ahead.
+
+  - task_id: food_cpi_fruit_preparations_nuts_18m
+    target_series_id: cpi_fruit_preparations_nuts_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Fruit, fruit preparations and nuts (2002=100)
+      exactly 18 months ahead.
+
+  - task_id: food_cpi_meat_18m
+    target_series_id: cpi_meat_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Meat (2002=100) exactly 18 months ahead.
+
+  - task_id: food_cpi_other_food_18m
+    target_series_id: cpi_other_food_nonalcoholic_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Other food products and non-alcoholic beverages
+      (2002=100) exactly 18 months ahead.
+
+  - task_id: food_cpi_vegetables_18m
+    target_series_id: cpi_vegetables_preparations_canada
+    horizon: 18
+    frequency: MS
+    description: >
+      Forecast Canada-wide CPI Vegetables and vegetable preparations (2002=100)
+      exactly 18 months ahead.
+
+# Eval window: July 2022 → July 2024 (~5 resolvable origins at 6-month stride).
+start: "2022-07-01"
+end: "2024-07-01"
+stride: 6
+warmup: 24
+
+# Budget: 5 multi_evaluate() calls per participant.
+max_runs: 5

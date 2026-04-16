@@ -26,7 +26,7 @@ Five people are active this sprint, each with a single focused area.
 
 Simultaneously develop the CFPR (Canada's Food Price Report) reference experiment and evolve the backtest/eval/live testing engine. These run concurrently: the CFPR task is familiar territory (Ethan is a many-time contributor to the real report) and grounds the more uncertain infrastructure work.
 
-**CFPR use case:** Source and document historical CFPR predictions and ground-truth food CPI outcomes; ingest into the data service; define a `ForecastingTask` mirroring the CFPR's actual prediction structure (annual horizon, ~8 food CPI categories, prediction date around the August/September CPI release); write a `BacktestSpec` YAML; produce a demo notebook under `implementations/experiments/cfpr/` with `DartsAutoARIMAPredictor` as the first baseline. A prior implementation from five years ago lives at https://github.com/VectorInstitute/foodprice-forecasting — useful for extracting the task structure, but the methods are outdated.
+**CFPR use case:** ✅ **IN PROGRESS (Apr 16, 2026)** — Food price experiment is live at `implementations/experiments/food_price_forecasting/`. Multi-target backtest/eval infrastructure added to framework. `DartsAutoARIMAPredictor` moved to `implementations/methods/darts_arima.py` with covariate support. `FREDAdapter` implemented. 9-category food CPI specs in `reference_specs/food_cpi/`. Notebooks: data exploration, 18m CFPR-replica, 3m denser-eval variant. **Remaining:** run the notebooks with actual data to validate end-to-end, collect first backtest results.
 
 **Testing engine:** The core backtest and eval infrastructure exists. What remains is the harder design question: what does "live testing" look like, and how do we handle it honestly for agentic forecasters? The central open question — to be explored with Ali — is how realistically we can retrieve internet context with effective information cutoffs for backtesting agentic forecasters. We may find that backtest results won't reliably generalize to live performance for agents that search the web; that's fine. Get the plumbing working, document the problem honestly, and chart the course toward agent skills that can interact with the backtest/eval engines and with baseline/numerical forecasters.
 
@@ -87,7 +87,7 @@ These tasks are scoped and understood but not yet assigned. Reorder priorities f
 
 The current predictor library has one variant: `DartsAutoARIMAPredictor`. Before the bootcamp, we want a richer numerical forecaster leaderboard: a trivial baseline, a broader Darts model, and at least one time series foundation model. This gives participants clear reference points to beat and demonstrates the breadth of the numerical forecasting paradigm.
 
-- Move `DartsAutoARIMAPredictor` from inline notebook definition to `implementations/methods/darts_arima.py`; update the CPI demo notebook to import it
+- ✅ Move `DartsAutoARIMAPredictor` from inline notebook definition to `implementations/methods/darts_arima.py`; update the CPI demo notebook to import it (completed Apr 16, 2026)
 - `SeasonalNaivePredictor` in `implementations/methods/naive.py`
 - A second Darts model predictor (ETS or N-BEATS)
 - `ChronosPredictor` or `TimesFMPredictor` — one time series foundation model via HuggingFace, zero-shot
