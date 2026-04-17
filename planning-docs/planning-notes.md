@@ -1,3 +1,113 @@
+## Apr 17, 2026 (pm) — `getting_started/` hello-world refactor + end-of-week tidy [Ethan & Agent]
+
+### Work completed
+
+**`economic_forecasting/` renamed to `getting_started/`**
+- The original example (CPI All-items, 12-month ahead) was too quiet to
+  teach anything — a smooth trending series does not motivate a
+  probabilistic forecast framework.  Retargeted to `cpi_gasoline_canada`:
+  four textbook regime shifts (2008 crude collapse, 2014-16 OPEC
+  decline, 2020 COVID, 2022 Russia/Ukraine) sit inside the backtest
+  window and produce visible CRPS spikes on both the naive and
+  AutoARIMA baselines.  The gasoline/AutoARIMA CRPS (~16.8) is only
+  ~22% below the naive floor (~21.5), which is exactly the teaching
+  moment: a pure univariate time-series method cannot see macro regime
+  shifts coming.  Motivation for everything downstream (covariates,
+  LLM context, agentic retrieval).
+- `implementations/experiments/getting_started/`:
+  - `cpi_data_exploration.ipynb` — trimmed to 3 focus series
+    (all-items, gasoline, shelter) to make the first look uncluttered.
+  - `cpi_backtest_demo.ipynb` — end-to-end tour.  Key additions vs. the
+    prior notebook: a 14×9 CI-band plot showing observed series +
+    AutoARIMA median + 80% band + naive points (focused on
+    2008-present); a `worst-origins` table sorted by AutoARIMA CRPS
+    that we map to real-world events; an optional `evaluate()`
+    walkthrough kept commented out to protect the eval budget; and a
+    shelter comparison cell to show the gasoline-vs-shelter contrast
+    in predictability.
+  - `README.md` — explicit "hello-world" framing, 5-step learning
+    path, graduation link to `food_price_forecasting/`.
+- New reference specs: `reference_specs/cpi_gasoline_{12m,eval_2yr}.yaml`.
+- Removed: `economic_forecasting/`, `cpi_allitems_{12m,eval_2yr}.yaml`.
+- Updated cross-references in root `README.md`,
+  `implementations/README.md`, `experiments/README.md`,
+  `technical-design.md`, `backlog.md`, and aieng docstrings.
+
+**End-to-end execution verified**
+- `cpi_data_exploration.ipynb`: runs in ~5s.
+- `cpi_backtest_demo.ipynb`: runs in ~19s (AutoARIMA on 51 origins is
+  surprisingly fast).  Produces the expected CRPS table (gasoline:
+  naive 21.5, arima 16.8; shelter: naive 4.2, arima 1.7) and the
+  worst-origins table identifies 2021-Jul, 2008-Jul, 2014-Jan, 2021-Jan,
+  2007-Jul — exactly the regime shifts the narrative predicts.
+- `make lint` passes cleanly (after a small pre-existing cleanup of
+  ruff format drift in `food_price_forecasting/` and an
+  `artifacts.py` duplicate-docstring flag — separate commit).
+
+### Key decisions
+
+- **`getting_started/` over `energy_cpi/`.**  Folder name should
+  signal role (pedagogical entry point), not content (energy).  The
+  target series can evolve without forcing a rename; the experiment's
+  job is "first contact with the framework," which is stable.
+- **Gasoline, not shelter.**  Both were considered.  Gasoline's
+  amplitude dominates (YoY swings of ±40% vs. shelter's ±8%), which
+  makes the CI-band plot self-explanatory and motivates the downstream
+  work more directly.  Shelter is retained as a comparison series and
+  as the "try this next" exercise at the end of the notebook.
+- **Two reference specs, not one.**  Keep the backtest/eval split
+  symmetric with CFPR so the same patterns carry over.  Both use the
+  same task definition; they only differ in window and `max_runs`.
+- **All 47 CPI series still registered by `scripts/fetch_cpi.py`.**
+  Only the notebook's focus changed; data coverage is unaffected.
+- **Do not rewrite historical planning-notes entries.**  Entries from
+  Mar 31 - Apr 16 still reference `economic_forecasting/` and
+  `cpi_allitems_*.yaml`; they are correct as historical record.  This
+  entry supersedes them.
+
+### Breadcrumbs for next week
+
+End-of-week checkpoint — leaving a trail of pick-ups for the next session:
+
+1. **Sprint sync review.**  Backlog active-sprint items are still
+   current as of Apr 17.  Before Monday: confirm with Ali whether the
+   base LLMP landing timeline is still this sprint (so we can wire
+   `BaseLLMPredictor` into `getting_started/cpi_backtest_demo.ipynb`
+   as a fourth comparison row once it exists).
+2. **Covariate framing design session.**  Still deferred.  The
+   getting-started narrative explicitly flags exogenous covariates as
+   "the obvious next thing"; the sooner we have a design, the sooner
+   we can layer a covariate-using predictor onto both the gasoline
+   and the CFPR tasks.  Candidate covariates for gasoline: FRED WTI
+   spot (DCOILWTICO), CAD/USD exchange rate (DEXCAUS).
+3. **Numeric predictors as agent skills design session.**  Deferred
+   again; still depends on Ali's first LLMP being up.
+4. **Seasonal naive.**  The numerical-expansion holding-queue item
+   explicitly calls out `SeasonalNaivePredictor` — a useful next
+   baseline row in the getting-started notebook (monthly CPI has
+   mild seasonality).  Good onboarding task for a new contributor.
+5. **Eval-result persistence in `getting_started/`.**  The backtest
+   demo serialises a `BacktestResult` to stdout YAML but does not
+   save it.  Once we have >1 predictor comparison, wire in
+   `save_backtest_result` + `load_backtest_result` for rerun speed,
+   mirroring CFPR.  Low priority — single-target backtests are
+   already fast.
+6. **Consistency nit.**  `bootcamp-project-charter.md` still lists
+   NYISO as *the* canonical energy dataset.  That's fine; the
+   getting-started choice of gasoline CPI is not an energy dataset
+   per se (it's a consumer price index on an energy good), so there
+   is no charter conflict.  Revisit only if Behnoosh's NYISO work
+   starts and we want a second getting-started variant.
+
+### Commits
+
+- `8c06589` — `chore`: resolve pre-existing lint drift in CFPR
+  helpers and artifacts
+- `2fa638a` — `refactor(experiments)`: rename economic_forecasting →
+  getting_started with CPI gasoline
+
+---
+
 ## Apr 17, 2026 — CFPR refactor: helper modules, artefact cache, canonical spec [Ethan & Agent]
 
 ### Work completed

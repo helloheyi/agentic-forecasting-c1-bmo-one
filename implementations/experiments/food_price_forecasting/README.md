@@ -4,9 +4,12 @@ Replicates the **Canada's Food Price Report (CFPR)** forecasting methodology —
 an annual estimate of the year-over-year percentage change in Canadian food
 prices across nine CPI sub-categories.
 
-The experiment is designed to be the bootcamp's first end-to-end example: a
-fully working, literature-aligned forecasting task that runs in minutes on a
+This is the bootcamp's **flagship** reference experiment — the graduation
+step from `implementations/experiments/getting_started/`.  It is a fully
+working, literature-aligned forecasting task that runs in minutes on a
 laptop and provides a launching pad for LLM and agent-based predictors.
+If this is your first session with the repo, start at `getting_started/`
+and come here once the single-series loop is familiar.
 
 ---
 
