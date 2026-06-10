@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentic-forecasting-implementations",
     "lightgbm>=4.0.0",
-    "ipykernel>=7.2.0",
+    "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "prophet>=1.1",
     "plotly>=6.8.0",
