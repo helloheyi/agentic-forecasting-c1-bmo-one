@@ -454,12 +454,46 @@ def decision_panel_data(
     )
 
 
+def panel_rationales_markdown(panel: DecisionPanel, labels: dict[str, str] | None = None) -> str:
+    """Render a decision panel's rationales as a Markdown string.
+
+    One block per method that recorded a ``rationale`` and/or ``key_signals``;
+    methods without either are skipped. Intended for ``IPython.display.Markdown``
+    in notebooks, keeping rationale prose out of the matplotlib figure.
+
+    Parameters
+    ----------
+    panel : DecisionPanel
+        Assembled by :func:`decision_panel_data`.
+    labels : dict[str, str] or None
+        Optional predictor_id -> display-label map for the block headings.
+
+    Returns
+    -------
+    str
+        Markdown text, or the empty string when no method recorded a rationale.
+    """
+    label_map = {row.predictor_id: (labels or {}).get(row.predictor_id, row.predictor_id) for row in panel.rows}
+    blocks: list[str] = []
+    for row in panel.rows:
+        if not row.rationale and not row.key_signals:
+            continue
+        block = f"**{label_map[row.predictor_id]}**"
+        if row.key_signals:
+            block += "\n\nKey signals: " + ", ".join(row.key_signals)
+        if row.rationale:
+            block += f"\n\n{row.rationale}"
+        blocks.append(block)
+    return "\n\n---\n\n".join(blocks)
+
+
 __all__ = [
     "DecisionPanel",
     "PanelRow",
     "calibration_table",
     "decision_panel_data",
     "one_vs_rest_frame",
+    "panel_rationales_markdown",
     "predictions_to_frame",
     "rationales_table",
     "score_leaderboard",

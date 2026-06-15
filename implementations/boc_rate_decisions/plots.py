@@ -9,7 +9,6 @@ caller can further customise or save the figure.
 from __future__ import annotations
 
 import math
-import textwrap
 from typing import Literal
 
 import matplotlib.pyplot as plt
@@ -511,9 +510,11 @@ def plot_decision_panel(
     """Render one meeting's prediction-vs-outcome panel across all methods.
 
     Composite figure: a policy-rate context strip (the ~12 months up to the
-    forecast origin), grouped horizontal probability bars per method with the
-    realised category starred and outlined, and a rationale footer for methods
-    that recorded one.
+    forecast origin) and grouped horizontal probability bars per method with
+    the realised category starred and outlined. Rationales are intentionally
+    *not* drawn here — render them as notebook markdown via
+    :func:`~boc_rate_decisions.analysis.panel_rationales_markdown` so the prose
+    stays legible.
 
     Parameters
     ----------
@@ -528,37 +529,21 @@ def plot_decision_panel(
     Returns
     -------
     (Figure, list[Axes])
-        ``[context_ax, bars_ax, rationale_ax]``.
+        ``[context_ax, bars_ax]``.
     """
     rows = panel.rows
     label_map = _resolve_labels([row.predictor_id for row in rows], labels)
     n = max(len(rows), 1)
 
-    rationale_blocks: list[str] = []
-    for row in rows:
-        if row.rationale:
-            text = row.rationale if len(row.rationale) <= 280 else row.rationale[:280].rstrip() + "…"
-            rationale_blocks.append(textwrap.fill(f"{label_map[row.predictor_id]}: {text}", width=108))
-    rationale_text = "\n".join(rationale_blocks)
-    n_rat_lines = (rationale_text.count("\n") + 1) if rationale_text else 0
-
     ctx_h = 1.3
     bars_h = 0.62 * n + 0.5
-    rat_h = 0.20 * n_rat_lines + (0.3 if n_rat_lines else 0.0)
-    fig = plt.figure(figsize=(11, ctx_h + bars_h + rat_h + 0.8))
-    gs = fig.add_gridspec(3, 1, height_ratios=[ctx_h, bars_h, max(rat_h, 0.01)], hspace=0.55)
+    fig = plt.figure(figsize=(11, ctx_h + bars_h + 0.8))
+    gs = fig.add_gridspec(2, 1, height_ratios=[ctx_h, bars_h], hspace=0.55)
     ax_ctx = fig.add_subplot(gs[0])
     ax_bar = fig.add_subplot(gs[1])
-    ax_rat = fig.add_subplot(gs[2])
-    ax_rat.axis("off")
 
     _draw_panel_context(ax_ctx, panel, rate_df)
     _draw_panel_bars(ax_bar, panel, label_map)
-
-    if rationale_text:
-        ax_rat.text(
-            0.0, 1.0, rationale_text, va="top", ha="left", fontsize=8, family="monospace", transform=ax_rat.transAxes
-        )
 
     realised = panel.outcome_label.upper() if panel.outcome_label else "PENDING"
     fig.suptitle(
@@ -567,11 +552,10 @@ def plot_decision_panel(
         fontsize=12,
         y=0.99,
     )
-    # Manual margins (not tight_layout): the GridSpec mixes a context strip, a
-    # bar axis with long y-labels, and an off-axis text panel, which tight_layout
-    # cannot solve cleanly.
-    fig.subplots_adjust(left=0.26, right=0.97, top=0.93, bottom=0.04)
-    return fig, [ax_ctx, ax_bar, ax_rat]
+    # Manual margins (not tight_layout): the GridSpec mixes a context strip and
+    # a bar axis with long y-labels, which tight_layout cannot solve cleanly.
+    fig.subplots_adjust(left=0.26, right=0.97, top=0.91, bottom=0.06)
+    return fig, [ax_ctx, ax_bar]
 
 
 __all__ = [

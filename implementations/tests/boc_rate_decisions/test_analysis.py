@@ -14,7 +14,7 @@ import pytest
 from aieng.forecasting.evaluation.backtest import BacktestResult, BacktestSpec
 from aieng.forecasting.evaluation.prediction import CategoricalForecast, Prediction
 from aieng.forecasting.evaluation.task import ForecastingTask, TaskCategory
-from boc_rate_decisions.analysis import decision_panel_data
+from boc_rate_decisions.analysis import decision_panel_data, panel_rationales_markdown
 
 
 _CATEGORIES = [
@@ -148,3 +148,17 @@ def test_rationale_and_signals_are_extracted() -> None:
 def test_requires_categorical_results() -> None:
     with pytest.raises(ValueError, match="categorical"):
         decision_panel_data({}, _event_df())
+
+
+def test_panel_rationales_markdown_includes_only_methods_with_rationale() -> None:
+    panel = decision_panel_data(_results(), _event_df())  # September: agent has rationale + signals
+    md = panel_rationales_markdown(panel, {"agent": "Agent", "climatology": "Climatology"})
+    assert "**Agent**" in md
+    assert "Easing cycle underway." in md
+    assert "Key signals: yield -1.23, rate momentum" in md
+    assert "Climatology" not in md  # no rationale → block skipped
+
+
+def test_panel_rationales_markdown_empty_when_no_rationales() -> None:
+    panel = decision_panel_data(_results(), _event_df(), meeting_date="2024-06-05")  # no metadata
+    assert panel_rationales_markdown(panel) == ""
