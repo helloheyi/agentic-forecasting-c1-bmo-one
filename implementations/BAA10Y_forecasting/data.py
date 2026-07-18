@@ -3,10 +3,8 @@
 Target: Moody's Seasoned Baa Corporate Bond Yield Relative to the
 10-Year Treasury Constant Maturity Rate, downloaded from FRED using
 series ID ``BAA10Y``
-
-Δt(N)​=BAA10Yt​−BAA10Yt−N​
-
-The target is measured in percent and is forecast at selected business-day
+delta_t(N) = BAA10Y(t) - BAA1OY(t-N)
+The target is measured in basis point and is forecast at selected business-day
 horizons, such as 1, 5, and 21 business days.
 
 
@@ -156,8 +154,8 @@ def _build_cumulative_spread_change_frame(spread_df: pd.DataFrame, window: int) 
     frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
     frame = frame.dropna(subset=["value"]).reset_index(drop=True)
    
-    # BAA10Y is measured in percent. 
-    # spread widening/tightening in percentage points 
+    # BAA10Y is measured in basis. 
+    # spread widening/tightening in basis points 
     frame["value"] = frame["value"] - frame["value"].shift(window)
 
     frame = frame.dropna(subset=["value"]).reset_index(drop=True)
@@ -226,7 +224,7 @@ def build_baa10y_target_service(
                     f"{window} business day(s) ({label})"
                 ),
                 source=f"FRED ({BAA10Y_FRED_ID}), derived",
-                units="percentage-points",
+                units="basis-points",
 
                 # frequency="D"   # every calendar day, including weekends
                 # frequency="B"   # every weekday, excluding weekends
