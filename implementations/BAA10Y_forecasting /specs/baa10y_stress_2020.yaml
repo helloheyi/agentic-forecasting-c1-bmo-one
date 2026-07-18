@@ -25,7 +25,7 @@ tasks:
     horizons: [1]
     frequency: B
     description: >-
-      S&P 500 close-to-close cumulative change, 1 business day ahead
+      BAA10Y close-to-close cumulative change, 1 business day ahead
       (next-session change / direction).
 
   - task_id: baa10y_change_5b
@@ -33,7 +33,7 @@ tasks:
     horizons: [5]
     frequency: B
     description: >-
-      S&P 500 close-to-close cumulative change, 5 business days ahead
+      BAA10Y close-to-close cumulative change, 5 business days ahead
       (forward 1-week change).
 
   - task_id: baa10y_change_21b
@@ -41,7 +41,7 @@ tasks:
     horizons: [21]
     frequency: B
     description: >-
-      S&P 500 close-to-close cumulative change, 21 business days ahead
+      BAA10Y close-to-close cumulative change, 21 business days ahead
       (forward 1-month change).
 
 start: "2020-02-03"
