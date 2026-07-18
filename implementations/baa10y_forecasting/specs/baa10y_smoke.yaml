@@ -8,23 +8,22 @@
 # This spec carries experiment design only — the window, stride/warmup, and one
 # single-horizon task per target. WHICH predictors run (and all their
 # hyperparameters, including the covariate panel) is configured in the notebook,
-# not here. Each task targets `sp500_logret_{N}b` (the close-to-close cumulative
-# log return over N business days), so forecasting it N steps ahead resolves to
+# not here. Each task targets `baa10y_{N}b` (the close-to-close spread change over N business days), so forecasting it N steps ahead resolves to
 # the forward N-session return.
 #
 # Prerequisites (warm caches to the present first):
 #   uv run python scripts/fetch_sp500_market.py --refresh   # ^GSPC / ^VIX / ^IXIC
 #   uv run python scripts/fetch_fred.py                     # macro covariates
 
-spec_id: sp500_smoke
+spec_id: baa10y_smoke
 
 description: >-
   Smoke multivariate demo: weekly origins in late 2025 (post-cutoff),
   forecasting close-to-close cumulative returns at 1/5/21 business days.
 
 tasks:
-  - task_id: sp500_logret_1b
-    target_series_id: sp500_logret_1b
+  - task_id: baa10y_1b
+    target_series_id: baa10y_1b
     horizons: [1]
     frequency: B
     description: >-
