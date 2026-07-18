@@ -1,7 +1,7 @@
-"""Matplotlib helpers for the multivariate S&P 500 demo notebook.
-
-Keeps the notebook narrative-focused; style matches
-``food_price_forecasting/plots.py`` (matplotlib only, ``(fig, ax)`` returns).
+"""Matplotlib helpers for the multivariate BAA10Y demo notebook.
+    BAA10Y spread changes and their forecasts are assumed to be stored in basis
+    points. No additional percentage-point-to-basis-point conversion is performed
+    in this module.
 """
 
 from __future__ import annotations
@@ -16,29 +16,29 @@ import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
-from sp500_forecasting.analysis import style_results_dataframe
-from sp500_forecasting.data import SP500_LOG_RETURN_SERIES_ID
+from BAA10Y_forecasting.analysis import style_results_dataframe
+from BAA10Y_forecasting.data import BAA10Y_CHANGE_SERIES_ID
 
 
 if TYPE_CHECKING:
     from aieng.forecasting.data.service import DataService
 
 
-def plot_sp500_log_return_recent(
+def plot_baa10y_spread_change_recent(
     data_service: DataService,
     *,
-    series_id: str = SP500_LOG_RETURN_SERIES_ID,
+    series_id: str = BAA10Y_CHANGE_SERIES_ID,
     n_trading_days: int = 756,
     title: str | None = None,
 ) -> tuple[Figure, Axes]:
-    """Plot the last *n_trading_days* observed close-to-close log returns.
+    """Plot recent BAA10Y spread changes in basis points.
 
     Parameters
     ----------
     data_service
         Any service that registers ``series_id`` (typically ``svc_no_cov``).
     series_id
-        Canonical log-return series id (defaults to the 1-business-day return).
+        BAA10Y spread-change series ID (defaults to the 1-business-day return).
     n_trading_days
         How many most recent rows to show (default ~3y of sessions).
     title
@@ -49,13 +49,18 @@ def plot_sp500_log_return_recent(
     plot_df = df.sort_values("timestamp").tail(int(n_trading_days)).copy()
     plot_df["timestamp"] = pd.to_datetime(plot_df["timestamp"])
 
+    # The target is in basis points.
+    plot_df["value_bp"] = pd.to_numeric(
+        plot_df["value"],
+        errors="coerce",
+    )
     fig, ax = plt.subplots(figsize=(10, 3.5), layout="constrained")
     ax.axhline(0.0, color="0.45", linewidth=0.8, linestyle="--", zorder=1)
     ax.fill_between(
         plot_df["timestamp"],
         0.0,
-        plot_df["value"],
-        where=plot_df["value"] >= 0,
+        plot_df["value_bp"],
+        where=plot_df["value_bp"] >= 0,
         interpolate=True,
         alpha=0.35,
         color="#1f77b4",
@@ -64,16 +69,16 @@ def plot_sp500_log_return_recent(
     ax.fill_between(
         plot_df["timestamp"],
         0.0,
-        plot_df["value"],
-        where=plot_df["value"] < 0,
+        plot_df["value_bp"],
+        where=plot_df["value_bp"] < 0,
         interpolate=True,
         alpha=0.35,
         color="#d62728",
         linewidth=0,
     )
-    ax.plot(plot_df["timestamp"], plot_df["value"], color="0.15", linewidth=0.6, zorder=2)
-    ax.set_xlabel("Session date (target timestamp)")
-    ax.set_ylabel("Log return")
+    ax.plot(plot_df["timestamp"], plot_df["value_bp"], color="0.15", linewidth=0.6, zorder=2)
+    ax.set_xlabel("Business date (target timestamp)")
+    ax.set_ylabel("Spread change (basis points)")
     ttl = title or (
         f"Observed {series_id} (last {len(plot_df)} sessions)\nPositive: index up over the window; negative: down."
     )
@@ -123,7 +128,7 @@ def plot_mean_crps_by_horizon(
     """Small-multiples: one CRPS bar panel per horizon, methods sorted within each.
 
     Expects a combined frame from
-    :func:`~sp500_forecasting.leaderboard.build_leaderboard` (with a ``horizon``
+    :func:`~BAA10Y_forecasting.leaderboard.build_leaderboard` (with a ``horizon``
     column).  Makes the "predictability decays with horizon" story visible.
     """
     d = results_df.dropna(subset=["mean_crps"]).copy()
@@ -151,7 +156,7 @@ def plot_mean_crps_by_horizon(
     return fig, ax_row
 
 
-def plot_return_forecast_vs_actual_multi(
+def plot_spread_change_forecast_vs_actual_multi(
     compare_by_run: Mapping[str, pd.DataFrame],
     *,
     title: str | None = None,
@@ -159,7 +164,7 @@ def plot_return_forecast_vs_actual_multi(
     """Realised return (once) vs each run's median forecast, rendered as percent.
 
     Each value frame is from
-    :func:`~sp500_forecasting.leaderboard.build_return_compare_frame` for a
+    :func:`~BAA10Y_forecasting.leaderboard.build_spread_change_compare_frame` for a
     single horizon.  Insertion order controls legend order.
     """
     fig, ax = plt.subplots(figsize=(12, 5.0), layout="constrained", facecolor="0.98")
@@ -167,7 +172,7 @@ def plot_return_forecast_vs_actual_multi(
 
     items = [(k, df) for k, df in compare_by_run.items() if df is not None and not df.empty]
     if not items:
-        ax.text(0.5, 0.5, "No rows to plot (check price cache and backtest window).", ha="center", va="center")
+        ax.text(0.5, 0.5, "No rows to plot (check data cache and backtest window).", ha="center", va="center")
         ax.set_axis_off()
         return fig, ax
 
@@ -177,7 +182,7 @@ def plot_return_forecast_vs_actual_multi(
     ax.axhline(0.0, color="0.5", linewidth=0.8, linestyle="--", zorder=1)
     ax.plot(
         base["session"].to_numpy(),
-        100.0 * base["actual_return"].to_numpy(dtype=float),
+        100.0 * base["actual_spread_change"].to_numpy(dtype=float),
         color="#0d47a1",
         linewidth=2.2,
         marker="o",
@@ -193,7 +198,7 @@ def plot_return_forecast_vs_actual_multi(
         d = d.sort_values("session")
         ax.plot(
             d["session"].to_numpy(),
-            100.0 * d["forecast_return"].to_numpy(dtype=float),
+            100.0 * d["forecast_spread_change"].to_numpy(dtype=float),
             color=cmap(i % 10),
             linewidth=1.6,
             linestyle="--",
@@ -203,10 +208,10 @@ def plot_return_forecast_vs_actual_multi(
             zorder=4 + i * 0.01,
         )
 
-    ttl = title or "S&P 500 — forecast vs realised return"
+    ttl = title or "BAA10Y spread change — forecast vs realised"
     ax.set_title(ttl, fontsize=12, fontweight="600", color="0.15")
     ax.set_xlabel("Session date (forecast resolution)", fontsize=10, color="0.25")
-    ax.set_ylabel("Return (%)", fontsize=10, color="0.25")
+    ax.set_ylabel("Spread change (basis points)", fontsize=10, color="0.25")
     ax.legend(loc="upper left", framealpha=0.92, fontsize=8, ncol=2)
     ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.6)
     ax.tick_params(axis="both", labelsize=9, colors="0.35")
@@ -234,5 +239,5 @@ def display_multivariate_backtest_leaderboard(results_df: pd.DataFrame) -> None:
     if "horizon" in results_df.columns and results_df["horizon"].nunique() > 1:
         plot_mean_crps_by_horizon(results_df)
     else:
-        plot_mean_crps_leaderboard(results_df, title="Mean CRPS — log return (target scale)")
+        plot_mean_crps_leaderboard(results_df, title="Mean CRPS — BAA10Y spread change " "(basis-point scale)")
     plt.show()

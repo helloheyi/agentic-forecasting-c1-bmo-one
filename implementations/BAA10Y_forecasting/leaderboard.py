@@ -1,13 +1,13 @@
-"""Leaderboard rows for the multivariate S&P 500 experiment.
+"""Leaderboard rows for the multivariate BAA10Y spread-change experiment.
 
 The notebook runs each predictor with the shared
 :func:`~aieng.forecasting.evaluation.cached_multi_backtest` /
 :func:`~aieng.forecasting.evaluation.multi_evaluate` helpers, which return a
 ``dict`` keyed by ``task_id`` (one task per horizon, targeting
-``sp500_logret_{N}b``).  :func:`build_leaderboard` turns the
+``baa10y_change_{N}b``).  :func:`build_leaderboard` turns the
 ``{predictor_id: {task_id: result}}`` mapping those produce into the
 ``RESULTS_DF`` frame consumed by
-:func:`~sp500_forecasting.plots.display_multivariate_backtest_leaderboard`
+:func:`BAA10Y_forecasting.plots.display_multivariate_backtest_leaderboard`
 (one row per predictor × horizon, with mean CRPS and next-direction metrics).
 
 Which predictors run, and all their hyperparameters, are configured in the
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from aieng.forecasting.data.service import DataService
 from aieng.forecasting.evaluation import BacktestResult, EvalResult
-from sp500_forecasting.analysis import (
+from BAA10Y_forecasting.analysis import (
     build_direction_eval_frame,
     direction_classification_metrics,
 )
@@ -41,15 +41,15 @@ _NAN_DIR: dict[str, float | int] = {
 }
 
 
-def build_return_compare_frame(
+def build_spread_change_compare_frame(
     predictions: list[Prediction],
     data_service: DataService,
     target_series_id: str,
 ) -> pd.DataFrame:
     """One row per scored prediction: realised return vs forecast median and 5–95% band.
 
-    Returns are kept on the target (log-return) scale; the notebook renders them
-    as percentages.  Rows whose ``forecast_date`` has no realised observation are
+    The realized values, forecasts, and quantiles are already measured in basis
+    points.  Rows whose ``forecast_date`` has no realised observation are
     dropped.
     """
     from datetime import datetime, timezone  # noqa: PLC0415
@@ -73,10 +73,10 @@ def build_return_compare_frame(
         rows.append(
             {
                 "session": ts,
-                "actual_return": float(lookup.loc[ts]),
-                "forecast_return": float(med),
-                "forecast_return_p05": float(qmap.get(0.05, float("nan"))),
-                "forecast_return_p95": float(qmap.get(0.95, float("nan"))),
+                "actual_spread_change": float(lookup.loc[ts]),
+                "forecast_spread_change": float(med),
+                "forecast_spread_change_p05": float(qmap.get(0.05, float("nan"))),
+                "forecast_spread_change_p95": float(qmap.get(0.95, float("nan"))),
             }
         )
     if not rows:
@@ -165,7 +165,7 @@ def build_leaderboard(
         ``run_number`` column.
     data_service
         Service that registers the target series (used for the next-direction
-        metrics that align each forecast with its realised return).
+        metrics that align each forecast with its realised spread change).
     covariates_by_predictor
         Optional ``{predictor_id: [series_id, ...]}`` so the ``uses_covariates`` /
         ``covariates`` columns reflect each predictor's covariate panel.  A
@@ -201,5 +201,5 @@ def build_leaderboard(
 
 __all__ = [
     "build_leaderboard",
-    "build_return_compare_frame",
+    "build_spread_change_compare_frame",
 ]

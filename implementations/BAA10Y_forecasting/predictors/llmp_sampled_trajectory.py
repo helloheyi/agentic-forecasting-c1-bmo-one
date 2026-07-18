@@ -1,8 +1,8 @@
-"""S&P 500 recipe: sampled-trajectory LLMP (target-only and with-covariates).
+"""BAA1OY recipe: sampled-trajectory LLMP (target-only and with-covariates).
 
 This file is intentionally small and explicit so notebook readers can open it as
 a reference recipe. The reusable method lives in ``aieng.forecasting``; this
-module captures the S&P 500 prompt framing (what the series *is* and how returns
+module captures the BAA1OY prompt framing (what the series *is* and how returns
 behave), the default sampling budget, the history window, and the cache tag used
 by the experiment.
 
@@ -28,29 +28,32 @@ from aieng.forecasting.models import LITE_MODEL
 _DEFAULT_MODEL = LITE_MODEL
 _DEFAULT_N_SAMPLES = 10
 _DEFAULT_HISTORY_WINDOW = 64
-_RECIPE_FAMILY = "sp500_v1"
+_RECIPE_FAMILY = "baa10y_v1"
 
 _SERIES_DESCRIPTION = (
-    "Series: S&P 500 (^GSPC) close-to-close cumulative log return over a fixed "
-    "number of business days.\n"
-    "Units: log-return (a value of 0.01 is roughly a +1% move).\n"
+    "Series: change in the FRED BAA10Y corporate credit spread over "
+    "a fixed number of business days. BAA10Y spread between Moody;s Seasoned Baa Corporate Bond and 10-Year Treasury Constant Maturity.\n"
+    "Units: percentage points. A positive value means spread widening;"
+    "a negative value means spread tightening.\n"
     "Frequency: business days (Mon-Fri)."
 )
 
+## provides BAA10Y-specific instructions to the LLM each time it generates a forecast.
+
 _USER_PROMPT_SUFFIX = (
     "Notes for this series:\n"
-    "- Daily index returns are close to a martingale: the *level* of the return "
-    "is barely predictable, so point forecasts should sit near 0 and the value "
-    "is in the *spread* (volatility and tail risk), not a confident direction.\n"
-    "- Returns cluster in volatility — calm and turbulent stretches persist — so "
-    "recent realised dispersion is the best guide to the width of your interval.\n"
-    "- Keep the distribution roughly symmetric about ~0 unless the recent history "
-    "or the covariate blocks give a clear reason to skew it; avoid extrapolating "
-    "a short run of up or down days into a trend."
+    "- Spread changes are generally centered near zero, but their volatility "
+    "varies over time and can rise sharply during periods of market stress.\n"
+    "- Credit-spread changes can be asymmetric. Sudden widening may be larger "
+    "than routine tightening, so allow a wider positive tail when VIX, Treasury "
+    "yields, or other covariates indicate financial stress.\n"
+    "- The forecast horizon is already encoded in the target series. Predict "
+    "the cumulative spread change directly rather than summing a simulated "
+    "daily path.\n"
 )
 
 
-def build_sp500_llmp_sampled_trajectory(
+def build_baa10y_llmp_sampled_trajectory(
     *,
     model: str = _DEFAULT_MODEL,
     n_samples: int = _DEFAULT_N_SAMPLES,
@@ -60,10 +63,10 @@ def build_sp500_llmp_sampled_trajectory(
     max_tokens: int = 16384,
     variant_tag: str | None = None,
 ) -> SampledTrajectoryLLMPredictor:
-    """Return the S&P 500 sampled-trajectory LLMP recipe.
+    """Build the BAA10Y sampled-trajectory LLMP predictor.
 
     The model is a normal parameter because the base LLMP ``predictor_id``
-    already includes it. The recipe tag records the S&P 500 prompt/config family,
+    already includes it. The recipe tag records the BAA10Y prompt/config family,
     whether the covariate panel is in context, and the cache-relevant knobs that
     are not otherwise visible in the ID.
 
@@ -108,4 +111,4 @@ def build_sp500_llmp_sampled_trajectory(
     return SampledTrajectoryLLMPredictor(config)
 
 
-__all__ = ["build_sp500_llmp_sampled_trajectory"]
+__all__ = ["build_baa10y_llmp_sampled_trajectory"]

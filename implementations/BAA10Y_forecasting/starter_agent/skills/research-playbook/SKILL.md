@@ -35,10 +35,24 @@ knowledge.
 
 ## Domain focus (edit this for your use case)
 
-For S&P 500 returns, the signals: the rate path and Fed guidance, recent
-inflation and jobs prints, the VIX and credit spreads, earnings-season tone, and
-major geopolitical or policy shocks. Search for the *current state* of these,
-then remember returns are close to a random walk — be humble about direction.
+For BAA10Y spread changes, focus searches on the current state of:
+
+- Federal Reserve policy and interest-rate guidance;
+- inflation and employment releases;
+- recession and economic-growth indicators;
+- corporate defaults, downgrades, and credit-rating developments;
+- corporate earnings, refinancing pressure, and funding conditions;
+- financial-sector stress and market liquidity;
+- VIX, equity-market stress, and investor risk sentiment;
+- major geopolitical or policy shocks affecting credit markets.
+
+Search for information available on or before the forecast cutoff. Give greater
+weight to Federal Reserve releases, official economic data, rating agencies,
+company disclosures, and established financial-news sources.
+
+Use news primarily to identify the current credit-risk regime and possible tail
+risk. Keep the directional forecast conservative unless multiple verified
+signals consistently support spread widening or tightening.
 
 ## Room to grow
 
