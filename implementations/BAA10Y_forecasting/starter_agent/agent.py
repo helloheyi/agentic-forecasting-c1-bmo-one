@@ -1,6 +1,6 @@
-"""S&P 500 starter agent — a fresh, hackable template for your own exploration.
+"""BAA10Y starter agent — a fresh, hackable template for your own exploration.
 
-This is the S&P 500 use case's **first** agent, and it is deliberately minimal:
+This is the BAA10Y use case's **first** agent, and it is deliberately minimal:
 a clean starting point with our common building blocks behind simple toggles —
 
 - **optional news search** (``enable_search``, on by default) — bounded,
@@ -14,10 +14,10 @@ Everything routes through the Vector proxy — no direct provider keys. See
 ``planning-docs/vector-llm-proxy.md``.
 
 This use case had no agent to borrow a prompt builder from, so
-:class:`Sp500StarterPromptBuilder` below is a small, self-contained serialiser —
+:class:`BAA10YStarterPromptBuilder` below is a small, self-contained serialiser —
 read it, then extend it (more covariates, richer panels, report context). The
-target is a single-horizon cumulative log return; the output is a probabilistic
-forecast of that return. Pair this with ``99_starter_agent.ipynb``.
+target is a single-horizon cumulative spread changes; the output is a probabilistic
+forecast of that spread change. Pair this with ``99_starter_agent.ipynb``.
 
 Module-level ``__getattr__`` exposes ``root_agent`` lazily so ``adk web`` can
 load this module for interactive (schema-free) use.
@@ -55,14 +55,14 @@ _CODE_ANALYSIS_SKILL = _SKILLS_ROOT / "code-analysis-playbook"
 
 
 # ---------------------------------------------------------------------------
-# Prompt builder (self-contained — this use case has no analyst_agent to reuse)
+# Prompt builder 
 # ---------------------------------------------------------------------------
 
 
-class Sp500StarterPromptBuilder(BaseModel):
-    """Serialise the target log-return series (+ optional covariate snapshot).
+class BAA10YStarterPromptBuilder(BaseModel):
+    """Serialize BAA10Y spread-change history and optional covariates.
 
-    Minimal on purpose: the recent history of the cumulative-log-return target,
+    Minimal on purpose: the recent history of the cumulative-spread change target,
     the task spec, the exact quantile grid, and — when ``covariate_series_ids``
     are supplied and present in the context — the latest value of each covariate
     as a leak-safe macro snapshot. Implements the
@@ -77,7 +77,7 @@ class Sp500StarterPromptBuilder(BaseModel):
 
     def __call__(self, *, task: ForecastingTask, context: ForecastContext) -> str:
         df = context.get_series(task.target_series_id).tail(self.history)
-        rows = ["date,log_return"] + [
+        rows = ["date,spread_change"] + [
             f"{pd.Timestamp(ts).date()},{float(v):.6f}" for ts, v in zip(df["timestamp"], df["value"])
         ]
 
@@ -96,7 +96,7 @@ class Sp500StarterPromptBuilder(BaseModel):
             "horizons": list(task.horizons),
             "standard_quantiles": list(STANDARD_QUANTILES),
             "target_summary": {
-                "last_log_return": float(df["value"].iloc[-1]),
+                "last_spread_change": float(df["value"].iloc[-1]),
                 "last_date": str(pd.Timestamp(df["timestamp"].iloc[-1]).date()),
                 "n_obs": int(len(df)),
             },
@@ -124,11 +124,15 @@ def _build_starter_instruction() -> str:
     """
     return (
         "## Role\n\n"
-        "You are an equity-market analyst — fluent in the rate path and Fed "
-        "guidance, inflation and jobs data, volatility and credit conditions, "
-        "and how macro catalysts move the S&P 500. This is a starter agent: keep "
-        "your reasoning transparent and your claims honest, and remember returns "
-        "are close to a random walk.\n\n"
+        "You are a corporate-credit-market analyst specializing in the BAA10Y "
+        "spread: Moody's Seasoned Baa Corporate Bond Yield Relative to the "
+        "10-Year Treasury yield. You understand Federal Reserve policy, "
+        "Treasury rates, inflation and employment data, economic growth, "
+        "corporate defaults and downgrades, refinancing conditions, market "
+        "liquidity, equity volatility, and investor risk sentiment.\n\n"
+        "keep your reasoning transparent and your claims honest,  BAA10Y spread "
+        "changes are often centered near zero, while volatility and tail risk vary "
+        "over time. Remain conservative about directional predictability.\n\n"  
         "## How to respond\n\n"
         "- For open-ended questions, scenario analysis, or anything "
         "conversational, answer directly and concisely — do NOT ask for a JSON "
@@ -142,12 +146,19 @@ _STARTER_INSTRUCTION = _build_starter_instruction()
 
 
 _CONTEXT_RETRIEVAL_INSTRUCTION = """\
-You are an equity-market intelligence specialist with web search.
+You are a corporate-credit-market intelligence specialist with web search.
 
 Return a concise structured markdown summary (3-5 paragraphs) covering, as the
-query warrants: the rate path and Fed guidance; recent inflation and jobs data;
-the VIX and credit spreads; earnings-season tone; and major geopolitical or
-policy shocks.
+query warrants: 
+- Federal Reserve policy, interest-rate guidance, and Treasury-market changes;
+- recent inflation, employment, and economic-growth data;
+- corporate defaults, downgrades, and rating-agency developments;
+- corporate refinancing pressure, funding conditions, and market liquidity;
+- VIX, equity-market stress, and broader investor risk sentiment;
+- financial-sector stress; 
+
+Focus on the current credit-risk regime and information that could affect
+short-horizon BAA10Y spread widening, tightening, volatility, or tail risk.
 
 Ground every claim in the search results you actually retrieve. When a cutoff
 date is specified, never report or speculate about events after it.
@@ -175,7 +186,7 @@ def build_starter_agent_config(
     enable_search: bool = True,
     enable_code_exec: bool = False,
 ) -> AgentConfig:
-    """Build the S&P 500 starter :class:`AgentConfig`.
+    """Build the BAA10Y starter :class:`AgentConfig`.
 
     Parameters
     ----------
@@ -215,7 +226,7 @@ def build_starter_agent_config(
     )
 
     return AgentConfig(
-        name="sp500_starter_agent",
+        name="baa10y_starter_agent",
         model=model,
         instruction=_STARTER_INSTRUCTION,
         # 16k headroom: enough for a complete run_code script + structured output.
@@ -264,11 +275,6 @@ def build_starter_agent_predictor(
 ) -> AgentPredictor:
     """Wrap a starter :class:`AgentConfig` in an :class:`AgentPredictor`.
 
-    Wraps :class:`Sp500StarterPromptBuilder` so the (drift-free) continuous
-    output schema and a forecast directive ride in the payload — keeping the
-    schema out of the persona. ``predict(task, context)`` returns one
-    :class:`~aieng.forecasting.evaluation.prediction.Prediction` for the task's
-    single horizon.
 
     Parameters
     ----------
@@ -282,7 +288,7 @@ def build_starter_agent_predictor(
     return AgentPredictor(
         agent_config=config,
         prompt_builder=_StarterForecastPromptBuilder(
-            Sp500StarterPromptBuilder(covariate_series_ids=covariate_series_ids or []),
+            BAA10YStarterPromptBuilder(covariate_series_ids=covariate_series_ids or []),
             ContinuousAgentForecastOutput.prompt_schema_json(),
         ),
         output_schema=ContinuousAgentForecastOutput,

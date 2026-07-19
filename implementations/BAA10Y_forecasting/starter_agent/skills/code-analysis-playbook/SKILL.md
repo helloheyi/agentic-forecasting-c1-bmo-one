@@ -12,6 +12,8 @@ description: >-
 A short guide to using the `run_code` sandbox productively. This is a starter
 skill — extend it with the diagnostics that matter for your problem.
 
+# BAA10Y code-analysis playbook
+
 ## Where your data lives
 
 All data comes from the **JSON payload in your context** — there are no disk
@@ -42,10 +44,14 @@ between your low and high quantiles — wider when recent volatility is high.
 
 ## Domain focus (edit this for your use case)
 
-For S&P 500 log-returns, the series is near-unforecastable in the mean: recent
-realised volatility is far more predictable than direction. Let recent vol, not a
-directional hunch, set the *width* of your quantile bands, and keep the point
-forecast close to zero unless you have real signal.
+For BAA10Y spread changes, the conditional mean may be difficult to forecast,
+so keep the point forecast near zero unless the target history or covariates
+provide a meaningful directional signal.Recent volatility is generally more informative for setting the width of the
+forecast distribution. Positive values represent spread widening and negative
+values represent spread tightening. During stressed periods, widening moves may
+produce a larger positive tail. The 1-, 5-, and 21-business-day target series already represent cumulative
+spread changes for their respective horizons. Forecast the selected target
+directly rather than aggregating it again.
 
 ## Room to grow
 

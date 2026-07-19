@@ -42,10 +42,17 @@ how wide the bands are, and widen them as the horizon grows.
 
 ## Domain focus (edit this for your use case)
 
-For S&P 500 log-returns, keep the point forecast near zero unless you have real
-signal — returns are close to a random walk. Let recent realised volatility set
-how WIDE the quantile bands are; it is far more predictable than direction. Note
-any macro catalyst you lean on in the rationale.
+For BAA10Y spread changes, keep the point forecast near zero unless the target
+history or covariates provide a meaningful directional signal. Recent
+volatility is generally more informative for determining the width of the
+forecast distribution than for predicting direction. 
+Positive values represent spread widening and negative values represent spread
+tightening. During stressed periods, widening moves may create a larger positive
+tail than the magnitude of routine tightening. Allow this asymmetry only when
+supported by recent history or available market covariates.
+The target series already represents the cumulative BAA10Y spread change for
+its configured horizon. Forecast it directly rather than aggregating it again.
+Mention any important market or macro signal used in the rationale.
 
 ## Room to grow
 
