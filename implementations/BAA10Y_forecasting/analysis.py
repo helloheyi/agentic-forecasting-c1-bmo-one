@@ -1,4 +1,8 @@
-"""Notebook-oriented formatting and direction metrics for the S&P 500 demo."""
+"""Notebook-oriented formatting and direction metrics for the BAA10Y demo.
+
+    Positive or "up" means spread widening. Negative or "down" means spread
+    tightening. Target values and CRPS are expected to be in basis points.
+"""
 
 from __future__ import annotations
 
@@ -34,7 +38,7 @@ def style_results_dataframe(df: pd.DataFrame) -> Styler:
     return df.style.format(fmt, na_rep="—")
 
 
-def prob_return_above_threshold_from_quantiles(quantiles: dict[float, float], threshold: float = 0.0) -> float:
+def prob_spread_change_above_threshold_from_quantiles(quantiles: dict[float, float], threshold: float = 0.0) -> float:
     """Approximate ``P(X > threshold)`` from a piecewise-linear CDF through quantile pairs."""
     pairs = sorted(((float(v), float(q)) for q, v in quantiles.items()), key=lambda x: x[0])
     if not pairs:
@@ -51,7 +55,11 @@ def build_direction_eval_frame(
     target_series_id: str,
     data_service: DataService,
 ) -> pd.DataFrame:
-    """Align each scored prediction with the realized log return at ``forecast_date``."""
+    """Align each prediction with the realised BAA10Y spread change.
+
+    Target values are already in basis points. No scaling is performed here.
+    Positive values mean spread widening.
+    """
     as_of_now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
     full_series = data_service.get_series(target_series_id, as_of=as_of_now)
     full = full_series.copy()
@@ -67,7 +75,7 @@ def build_direction_eval_frame(
             continue
         actual = float(lookup.loc[ts])
         qmap = p.payload.quantiles
-        prob_up = prob_return_above_threshold_from_quantiles(qmap, threshold=0.0)
+        prob_up = prob_spread_change_above_threshold_from_quantiles(qmap, threshold=0.0)
         rows.append(
             {
                 "as_of": p.as_of,
@@ -88,7 +96,11 @@ def direction_classification_metrics(
     y_pred_col: str = "pred_up_point",
     y_score_col: str = "prob_up",
 ) -> pd.Series:
-    """Binary metrics for predicting a positive next-session log return."""
+    """Binary metrics for predicting BAA10Y widening versus tightening.
+
+    Class 1 or "up" means a positive spread change: widening.
+    Class 0 or "down" means a non-positive spread change: tightening or unchanged.
+    """
     from sklearn.metrics import (  # noqa: PLC0415
         accuracy_score,
         balanced_accuracy_score,
@@ -118,8 +130,7 @@ def direction_classification_metrics(
     kappa = float(cohen_kappa_score(y_true, y_pred))
 
     baseline_acc = max(pos_rate, 1.0 - pos_rate)
-    maj = int(pos_rate >= 0.5)
-    baseline_always_up_acc = float((y_true == maj).mean())
+    baseline_always_up_acc = pos_rate
 
     roc = float("nan")
     if y_score_col in df.columns and np.unique(y_true).size == 2:
@@ -156,6 +167,6 @@ def direction_classification_metrics(
 __all__ = [
     "build_direction_eval_frame",
     "direction_classification_metrics",
-    "prob_return_above_threshold_from_quantiles",
+    "prob_spread_change_above_threshold_from_quantiles",
     "style_results_dataframe",
 ]
