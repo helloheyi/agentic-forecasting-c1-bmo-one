@@ -133,17 +133,24 @@ def _build_baa10y_analyst_instruction() -> str:
         "- `frequency`: expected to be `B`\n"
         "- `units`: expected to be `basis_points`\n"
         "- `standard_quantiles`: the exact quantile levels to produce\n"
-        "- `target_summary`: recent center, dispersion, range, and count\n"
-        "- `target_history_csv`: recent daily history and older weekly means\n"
+        "- `target_summary`: recent center, dispersion, range, and count for "
+        "the requested cumulative-change target\n"
+        "- `target_history_csv`: history of the requested cumulative-change "
+        "target\n"
+        "- `daily_change_history_csv`: one-business-day BAA10Y change history "
+        "for common regime, anomaly, and trend diagnostics\n"
         "- `covariate_snapshot`: latest leak-safe covariate values\n"
         "- `covariate_history`: recent leak-safe covariate histories\n"
         "- `covariate_data_dictionary`: feature descriptions, units, and "
         "interpretation\n"
         "- `missing_covariates`: requested features unavailable at `as_of`\n\n"
 
-        "The target already represents the cumulative BAA10Y spread change "
-        "for its configured window. Forecast the target directly. Do not sum, "
-        "compound, or aggregate it again.\n\n"
+        "The requested target already represents the cumulative BAA10Y spread "
+        "change for its configured window. Forecast that target directly. Do "
+        "not sum, compound, or aggregate it again. "
+        "`daily_change_history_csv` is instead the separate one-business-day "
+        "diagnostic history; do not treat it as the requested target when the "
+        "horizon is 5 or 21 business days.\n\n"
 
         "## Target interpretation\n\n"
         "- Positive values represent spread widening and increasing credit "
@@ -275,17 +282,20 @@ _CODE_EXEC_SUPPLEMENT = """
 
 ## Skills
 
-You have access to two BAA10Y skills through the SkillToolset. All data
+You have access to three BAA10Y skills through the SkillToolset. All data
 available to code execution comes from the JSON payload. There are no disk
 files or external datasets to read.
 
 Recommended invocation order:
 
-1. `statistical-analysis` — run first to measure recent center, dispersion,
-   widening-tail asymmetry, anomalies, and regime change.
+1. `statistical-analysis` — run first on the shared one-business-day history
+   to measure regime and anomaly conditions.
 2. `credit-driver-analysis` — run second to interpret leak-safe covariate
    histories, distinguish supporting from contradicting evidence, and frame
    conditional scenarios.
+3. `trend-projection` — optionally synthesize the statistical and
+   credit-driver outputs into a conservative directional rationale. Either
+   upstream input can be disabled when unavailable.
 
 To use a skill:
 
@@ -336,7 +346,7 @@ _SKILLS_ROOT = Path(__file__).parent / "skills"
 
 
 def compress_history(df: pd.DataFrame) -> str:
-    """Compress BAA10Y spread-change history to stay within context limits.
+    """Compress a BAA10Y spread-change series for prompt context.
 
     Returns daily bars for the most recent 6 months and weekly averages for
     older history. The CSV header is ``date,spread_change_bps``.
@@ -367,7 +377,7 @@ def compress_history(df: pd.DataFrame) -> str:
 # ---------------------------------------------------------------------------
 def build_covariate_history(
     context: ForecastContext,
-    rows: int = 21,
+    rows: int = 126,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return recent available covariate observations."""
 
@@ -392,6 +402,23 @@ def build_covariate_history(
 
     return result
 
+
+def build_covariate_data_dictionary(
+    context: ForecastContext,
+    available_series_ids: set[str],
+) -> dict[str, dict[str, str]]:
+    """Describe available covariates from registered service metadata."""
+
+    dictionary: dict[str, dict[str, str]] = {}
+    for series_id in sorted(available_series_ids):
+        metadata = context.get_metadata(series_id)
+        dictionary[series_id] = {
+            "description": metadata.description,
+            "units": metadata.units,
+            "source": metadata.source,
+        }
+    return dictionary
+
 class BAA10YForecastPromptBuilder(BaseModel):
     """Serialize one leak-safe BAA10Y forecasting task for the analyst.
 
@@ -403,16 +430,37 @@ class BAA10YForecastPromptBuilder(BaseModel):
     model_config = {"extra": "forbid"}
 
     def __call__(self, *, task: ForecastingTask, context: ForecastContext) -> str:
+        if len(task.horizons) != 1:
+            raise ValueError(
+                "BAA10Y analyst tasks must contain exactly one horizon; "
+                f"received {task.horizons}."
+            )
 
-        df = context.get_series(task.target_series_id)
-        compressed = compress_history(df)
-        last_row = df.iloc[-1]
         horizon = int(task.horizons[0])
+        expected_target_series_id = f"baa10y_change_{horizon}b"
+        if task.target_series_id != expected_target_series_id:
+            raise ValueError(
+                "BAA10Y analyst target/horizon mismatch: expected "
+                f"{expected_target_series_id!r} for horizons={task.horizons}, "
+                f"received {task.target_series_id!r}."
+            )
+
+        target_df = context.get_series(task.target_series_id)
+        daily_change_df = context.get_series("baa10y_change_1b")
+        target_history_csv = compress_history(target_df)
+        daily_change_history_csv = compress_history(daily_change_df)
+        last_row = target_df.iloc[-1]
 
         recent_values = pd.to_numeric(
-            df["value"].tail(252),
+            target_df["value"].tail(252),
             errors="coerce",
         ).dropna()
+        daily_values = pd.to_numeric(
+            daily_change_df["value"].tail(252),
+            errors="coerce",
+        ).dropna()
+        covariate_history = build_covariate_history(context)
+        available_covariates = set(covariate_history)
         payload: dict[str, Any] = {
             "task": task.task_id,
             "as_of": str(context.as_of)[:10],
@@ -444,11 +492,26 @@ class BAA10YForecastPromptBuilder(BaseModel):
                 "recent_max_bps": float(
                     recent_values.max()
                 ),
-                "n_observations": int(len(df)),
+                "n_observations": int(len(target_df)),
             },
-            "target_history_csv": compressed,
-            "covariate_history": build_covariate_history(
-                context
+            "daily_change_summary": {
+                "latest_change_bps": float(daily_change_df["value"].iloc[-1]),
+                "latest_observation_date": str(
+                    pd.Timestamp(daily_change_df["timestamp"].iloc[-1]).date()
+                ),
+                "recent_mean_bps": float(daily_values.mean()),
+                "recent_std_bps": float(daily_values.std(ddof=1)),
+                "n_observations": int(len(daily_change_df)),
+            },
+            "target_history_csv": target_history_csv,
+            "daily_change_history_csv": daily_change_history_csv,
+            "covariate_history": covariate_history,
+            "covariate_data_dictionary": build_covariate_data_dictionary(
+                context,
+                available_covariates,
+            ),
+            "missing_covariates": sorted(
+                set(BAA10Y_ANALYST_COVARIATE_SERIES_IDS) - available_covariates
             ),
         }
 
@@ -485,6 +548,8 @@ def build_baa10y_multitask_news_config(
         model=model,
         instruction=_BAA10Y_MULTITASK_ANALYST_INSTRUCTION,
         context_retrieval=ContextRetrievalConfig(
+            enabled=True,
+            instruction=_BAA10Y_CONTEXT_RETRIEVAL_INSTRUCTION,
             search_model=search_model,
             verifier_model=verifier_model,
             verifier_max_attempts=verifier_max_attempts,
@@ -507,6 +572,8 @@ def build_baa10y_news_config(
         model=model,
         instruction=_BAA10Y_ANALYST_INSTRUCTION,
         context_retrieval=ContextRetrievalConfig(
+            enabled=True,
+            instruction=_BAA10Y_CONTEXT_RETRIEVAL_INSTRUCTION,
             search_model=search_model,
             verifier_model=verifier_model,
             verifier_max_attempts=verifier_max_attempts,
@@ -534,6 +601,8 @@ def build_baa10y_code_exec_config(
         ),
         max_output_tokens=max_output_tokens,
         context_retrieval=ContextRetrievalConfig(
+            enabled=True,
+            instruction=_BAA10Y_CONTEXT_RETRIEVAL_INSTRUCTION,
             search_model=search_model,
             verifier_model=verifier_model,
             verifier_max_attempts=verifier_max_attempts,
@@ -545,6 +614,7 @@ def build_baa10y_code_exec_config(
         skills_dirs=[
             _SKILLS_ROOT / "statistical-analysis",
             _SKILLS_ROOT / "credit-driver-analysis",
+            _SKILLS_ROOT / "trend-projection",
         ],
     )
 
@@ -588,6 +658,8 @@ def build_baa10y_tool_config(
             + _FORECAST_TOOL_SUPPLEMENT
         ),
         context_retrieval=ContextRetrievalConfig(
+            enabled=True,
+            instruction=_BAA10Y_CONTEXT_RETRIEVAL_INSTRUCTION,
             search_model=search_model,
             verifier_model=verifier_model,
             verifier_max_attempts=verifier_max_attempts,

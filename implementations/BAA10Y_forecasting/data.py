@@ -48,12 +48,12 @@ import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from hyoas_proxy import (
-        DGS3_FRED_ID,
-        HYOAS_FRED_ID,
-        HYG_TICKER,
-        build_hyg_dgs3_proxy,
-    )
+from .hyoas_proxy import (
+    DGS3_FRED_ID,
+    HYOAS_FRED_ID,
+    HYG_TICKER,
+    build_hyg_dgs3_proxy,
+)
 import numpy as np
 import pandas as pd
 from aieng.forecasting.data import DataService, SeriesMetadata

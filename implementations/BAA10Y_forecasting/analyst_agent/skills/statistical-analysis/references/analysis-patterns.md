@@ -5,7 +5,10 @@ All examples operate only on values copied from the JSON task payload.
 
 The code-execution session is stateful within one turn. 
 Run Pattern 0 once,then reuse daily in the remaining patterns.
-BAA10Y values are not price levels. Do not calculate log returns, multiply by100, compound them, or difference the target again.
+`daily_change_history_csv` contains one-business-day BAA10Y changes in basis
+points.
+Do not calculate log returns, multiply values by 100, compound them, or
+difference them again.
 
 
 
@@ -19,7 +22,7 @@ connectto databases, or install packages.
 no packages to `pip install`. Everything you can use in code is already in
 the JSON payload in your context.
 
-**Parse the history string once.** `target_history_csv` is a string — parse
+**Parse the history string once.** `daily_change_history_csv` is a string — parse
 it with `io.StringIO` in your first code block. The Gemini session is
 stateful within a turn, so the resulting `df` is available in every
 subsequent block without re-parsing.
@@ -29,9 +32,11 @@ you as text in the conversation. Design your print statements to be short
 and readable — one labelled line per key result is easier to act on than a
 dump of raw numbers.
 
-**Use the daily portion.** The history contains recent daily observations
-and older weekly averages. `compress_history()` preserves approximately the
-latest six months as daily observations, so Patterns 1–3 use that period.
+**Use the daily portion.** The history contains one-business-day BAA10Y
+changes. It is shared across forecast horizons so Patterns 1–3 always diagnose
+the same daily credit-spread condition. Older rows may be weekly averages;
+`compress_history()` preserves approximately the latest six months as daily
+observations, so Patterns 1–3 use that period.
 
 
 ```python
@@ -43,7 +48,7 @@ import pandas as pd
 
 payload = ...  # JSON task payload
 
-history_csv = payload["target_history_csv"]
+history_csv = payload["daily_change_history_csv"]
 
 df = pd.read_csv(
     io.StringIO(history_csv),
@@ -87,7 +92,8 @@ print(
 
 ## Pattern 1: Recent center and volatility regime
 
-Compute the rolling 30-observation standard deviation of the BAA10Y target.
+Compute the rolling 30-observation standard deviation of the daily BAA10Y
+change history.
 Compare the latest value with the median rolling volatility in the supplied
 daily history.
 
@@ -118,17 +124,17 @@ print(
 REGIME: elevated  |  current_vol=41.3%  vs median=31.4%
 ```
 
-**What to do with this:** An `elevated` or `extreme` regime means recent
-spread changes are larger than usual. Use a shorter analysis window in
-Pattern 3 and allow wider forecast intervals.
+**What to do with this:** An `elevated` or `extreme` regime means recent daily
+spread changes are larger than usual. Use a shorter analysis window in Pattern
+3 and allow wider forecast intervals for the requested target.
 
 ---
 
 ## Pattern 2: Was the most recent move anomalous?
 
-The BAA10Y target is already a spread change over its configured business-day
-window. Do not call `.diff()` again. Compare the latest target value with the
-rolling standard deviation of the target.
+The history is already a one-business-day BAA10Y change. Do not call `.diff()`
+again. Compare the latest daily change with the rolling standard deviation of
+daily changes.
 
 ```python
 target_values = daily["spread_change_bps"].astype(float)
@@ -149,7 +155,7 @@ print(
 ANOMALY: z=+3.14  |  latest=+9.42 bps  rolling_std=3.00 bps
 ```
 
-**What to do with this:** `|z| > 2.5` indicates an unusual observation.
+**What to do with this:** `|z| > 2.5` indicates an unusual daily observation.
 A large positive value indicates unusual spread widening; a large negative
 value indicates unusual tightening. Treat either as a possible shock rather
 than automatically extending it into the forecast.
@@ -188,7 +194,8 @@ print(
 ANALYSIS_WINDOW: 15 observations  (regime=elevated, |z|=3.14 — shortened window)  |  median=+0.50 bps  std=5.10 bps
 ```
 
-**What to do with this:** Use the recent median as a conservative statistical
-anchor and the recent standard deviation to inform interval width. Then run
-the `credit-driver-analysis` skill to interpret direction using the supplied
-market covariates.
+**What to do with this:** Use the recent median and standard deviation as
+daily-condition diagnostics. They inform uncertainty and analysis-window
+selection; for a 5b or 21b forecast, do not use them as the target's point
+forecast center. Then run the `credit-driver-analysis` skill to interpret
+direction using the supplied market covariates.
