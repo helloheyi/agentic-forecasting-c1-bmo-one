@@ -1,0 +1,105 @@
+schema_version: 1
+created_at: '2026-08-20T19:41:08.844997+00:00'
+updated_at: '2026-08-20T20:05:26.205015+00:00'
+trials:
+- trial_id: trial-871549da5e4a
+  candidate_id: linreg_l5_target
+  predictor_id: baa10y_linreg_8ce9c7a855
+  method: linear_regression
+  horizon: 5
+  experiment: smoke
+  parameters:
+    lags: 5
+    num_samples: 100
+  covariate_panel: target_only
+  is_baseline: true
+  mean_crps: 3.634654200044712
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T19:41:08.838307'
+- trial_id: trial-05c7c035a029
+  candidate_id: linreg_l10_target
+  predictor_id: baa10y_linreg_3bdf488ec6
+  method: linear_regression
+  horizon: 5
+  experiment: smoke
+  parameters:
+    lags: 10
+    num_samples: 100
+  covariate_panel: target_only
+  is_baseline: false
+  mean_crps: 3.443620089739113
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T19:42:12.812518'
+- trial_id: trial-274c42a6a783
+  candidate_id: lightgbm_l5_target
+  predictor_id: baa10y_lightgbm_2dec4af372
+  method: lightgbm
+  horizon: 5
+  experiment: smoke
+  parameters:
+    lags: 5
+    num_samples: 100
+    lgbm_kwargs:
+      num_threads: 1
+      n_jobs: 1
+      random_state: 42
+  covariate_panel: target_only
+  is_baseline: true
+  mean_crps: 3.6205450662628498
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T19:42:35.838392'
+- trial_id: trial-352beb9b2257
+  candidate_id: lightgbm_l5_cov
+  predictor_id: baa10y_lightgbm_009c4bfca0
+  method: lightgbm
+  horizon: 5
+  experiment: smoke
+  parameters:
+    lags: 5
+    lags_past_covariates: 5
+    num_samples: 100
+    lgbm_kwargs:
+      num_threads: 1
+      n_jobs: 1
+      random_state: 42
+  covariate_panel: default
+  is_baseline: false
+  mean_crps: 4.260041169605704
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T19:45:21.650863'
+- trial_id: trial-82f54cccb782
+  candidate_id: llmp_n8_h48_target
+  predictor_id: llmp_sampled_trajectories_baa10y_adaptive_5bc809008e[gemini-3.1-flash-lite-preview]
+  method: llmp_sampled_trajectory
+  horizon: 5
+  experiment: smoke
+  parameters:
+    n_samples: 8
+    history_window: 48
+  covariate_panel: target_only
+  is_baseline: true
+  mean_crps: 4.792520661157029
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T20:05:19.386054'
+- trial_id: trial-c0dc04efc320
+  candidate_id: llmp_n12_h48_target
+  predictor_id: llmp_sampled_trajectories_baa10y_adaptive_1a710fb14d[gemini-3.1-flash-lite-preview]
+  method: llmp_sampled_trajectory
+  horizon: 5
+  experiment: smoke
+  parameters:
+    n_samples: 12
+    history_window: 48
+  covariate_panel: target_only
+  is_baseline: false
+  mean_crps: 4.5370316804407755
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T20:05:26.187254'
+promoted_configurations: []
+rejected_candidates: []
