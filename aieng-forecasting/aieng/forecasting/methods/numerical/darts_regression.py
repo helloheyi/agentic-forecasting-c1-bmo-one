@@ -61,6 +61,7 @@ Usage
 
 from __future__ import annotations
 
+import functools
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -89,6 +90,54 @@ _TRAINING_QUANTILES: list[float] = [
     0.95,
     0.975,
 ]
+
+
+class _PerQuantileLightGBMModel:
+    """Mixin providing per-quantile kwarg overrides for Darts' ``LightGBMModel``.
+
+    Darts' ``LightGBMModel.fit()`` loops over ``self.quantiles``, calling
+    ``self._create_model(**self.kwargs)`` fresh for each quantile — identical
+    kwargs every call except ``alpha`` (confirmed against
+    ``darts/models/forecasting/lgbm.py``). This overrides ``_create_model`` to
+    merge ``per_quantile_kwargs[alpha]`` on top of the base kwargs before
+    delegating, so each quantile's booster can use a different
+    ``num_leaves``/``max_depth``/regularisation/``learning_rate``/``n_estimators``.
+
+    Takes a plain ``dict[float, dict[str, Any]]`` in and passes plain kwargs
+    through — this class has no notion of "tuning"; that lives entirely in
+    :mod:`aieng.forecasting.methods.numerical.lgbm_quantile_tuning`, the only
+    place that builds such a dict. See ``docs/lightgbm-quantile-tuning-guide.md``
+    for the full design rationale.
+
+    Declared as a plain mixin (not subclassing ``LightGBMModel`` directly) so
+    it can be composed with the real class only where imported, keeping Darts
+    out of this module's import graph at load time — consistent with the
+    deferred-import convention used throughout this file.
+    """
+
+    def __init__(self, *args: Any, per_quantile_kwargs: dict[float, dict[str, Any]] | None = None, **kwargs: Any) -> None:
+        # Set before super().__init__(): LightGBMModel.__init__ calls
+        # self._create_model(**self.kwargs) synchronously, which dispatches to
+        # our override below — the attribute must already exist by then.
+        self._per_quantile_kwargs = per_quantile_kwargs or {}
+        super().__init__(*args, **kwargs)
+
+    def _create_model(self, **kwargs: Any) -> Any:
+        overrides = self._per_quantile_kwargs.get(kwargs.get("alpha"), {})
+        return super()._create_model(**{**kwargs, **overrides})
+
+
+@functools.cache
+def _get_per_quantile_lightgbm_model_cls() -> type:
+    """Build (once) and cache ``LightGBMModel`` composed with the per-quantile mixin.
+
+    Deferred so importing this module never triggers a Darts import; only
+    calling :meth:`DartsLightGBMPredictor.predict` with ``per_quantile_kwargs``
+    set does.
+    """
+    from darts.models import LightGBMModel  # noqa: PLC0415
+
+    return type("_PerQuantileLightGBMModel", (_PerQuantileLightGBMModel, LightGBMModel), {})
 
 
 class _DartsRegressionModel(Protocol):
@@ -336,7 +385,18 @@ class DartsLightGBMPredictor(Predictor):
         Extra keyword arguments passed through to
         :class:`darts.models.LightGBMModel`.  Use this to tune tree depth,
         leaf count, regularisation, etc.  ``verbose=-1`` is always injected
-        unless the caller overrides it.
+        unless the caller overrides it.  Applied to every quantile's booster
+        as a base config, before any ``per_quantile_kwargs`` override.
+    per_quantile_kwargs : dict[float, dict[str, Any]] or None
+        Optional per-quantile overrides, keyed by quantile level (must match
+        entries in :data:`_TRAINING_QUANTILES`).  Each quantile's booster is
+        built from ``lgbm_kwargs`` with that quantile's dict merged on top,
+        letting e.g. tail quantiles (0.025/0.975) use a different
+        ``num_leaves``/``min_data_in_leaf``/regularisation than the median.
+        ``None`` (the default) preserves the single-shared-config behaviour
+        every existing caller relies on.  Typically produced by
+        :func:`aieng.forecasting.methods.numerical.lgbm_quantile_tuning.tune_lightgbm_quantile_config`
+        rather than written by hand — see ``docs/lightgbm-quantile-tuning-guide.md``.
 
     Notes
     -----
@@ -352,6 +412,7 @@ class DartsLightGBMPredictor(Predictor):
         covariate_series_ids: list[str] | None = None,
         num_samples: int = 500,
         lgbm_kwargs: dict[str, Any] | None = None,
+        per_quantile_kwargs: dict[float, dict[str, Any]] | None = None,
     ) -> None:
         self._lags = lags
         self._lags_past_covariates = lags_past_covariates
@@ -360,24 +421,34 @@ class DartsLightGBMPredictor(Predictor):
         kwargs = dict(lgbm_kwargs or {})
         kwargs.setdefault("verbose", -1)
         self._lgbm_kwargs = kwargs
+        self._per_quantile_kwargs = per_quantile_kwargs or None
 
     @property
     def predictor_id(self) -> str:
-        """Return a stable identifier, suffixed ``_cov`` when covariates are used."""
-        suffix = "_cov" if self._covariate_series_ids else ""
-        return f"darts_lightgbm{suffix}"
+        """Return a stable identifier, suffixed ``_cov``/``_tuned`` as applicable."""
+        cov_suffix = "_cov" if self._covariate_series_ids else ""
+        tuned_suffix = "_tuned" if self._per_quantile_kwargs else ""
+        return f"darts_lightgbm{cov_suffix}{tuned_suffix}"
 
     def predict(self, task: ForecastingTask, context: ForecastContext) -> list[Prediction]:
         """Produce probabilistic LightGBM forecasts for every horizon in the task."""
         from darts.models import LightGBMModel  # noqa: PLC0415
 
-        model = LightGBMModel(
+        if self._per_quantile_kwargs:
+            model_cls = _get_per_quantile_lightgbm_model_cls()
+            extra_kwargs: dict[str, Any] = {"per_quantile_kwargs": self._per_quantile_kwargs}
+        else:
+            model_cls = LightGBMModel
+            extra_kwargs = {}
+
+        model = model_cls(
             lags=self._lags,
             lags_past_covariates=(self._lags_past_covariates if self._covariate_series_ids else None),
             output_chunk_length=task.horizon,
             likelihood="quantile",
             quantiles=_TRAINING_QUANTILES,
             **self._lgbm_kwargs,
+            **extra_kwargs,
         )
 
         samples_by_horizon = _fit_and_sample(

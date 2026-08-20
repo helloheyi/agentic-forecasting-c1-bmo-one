@@ -38,6 +38,7 @@ llm = [
 numerical = [
     "darts>=0.44.1",
     "lightgbm>=4.6.0",
+    "optuna>=4.0",
     "statsforecast>=2.0.1",
 ]
 

@@ -80,13 +80,14 @@ from aieng.forecasting.methods.agentic import (
 
 ### Numerical
 
-| Module | Class | Description |
+| Module | Class / Function | Description |
 |---|---|---|
 | `numerical/darts_arima.py` | `DartsAutoARIMAPredictor` | Univariate Darts AutoARIMA with probabilistic multi-horizon output via Monte Carlo sampling. |
 | `numerical/darts_classical.py` | `DartsExponentialSmoothingPredictor` | Univariate state-space exponential smoothing (ETS); fast probabilistic baseline (non-seasonal by default, optional `seasonal_periods`). |
 | `numerical/darts_classical.py` | `DartsKalmanForecasterPredictor` | Univariate linear Gaussian state-space (Kalman) forecaster; fast probabilistic baseline with configurable latent dimension `dim_x`. |
 | `numerical/darts_regression.py` | `DartsLinearRegressionPredictor` | Darts linear regression predictor with optional past covariates and probabilistic output. |
-| `numerical/darts_regression.py` | `DartsLightGBMPredictor` | Darts LightGBM quantile-regression predictor with optional past covariates. |
+| `numerical/darts_regression.py` | `DartsLightGBMPredictor` | Darts LightGBM quantile-regression predictor with optional past covariates and optional `per_quantile_kwargs` (one LightGBM config per quantile level, typically produced by `lgbm_quantile_tuning.py`). |
+| `numerical/lgbm_quantile_tuning.py` | `tune_lightgbm_quantile_config`, `tune_lightgbm_configs` | Optuna-based search for per-quantile LightGBM configs against a trailing, leakage-safe validation window (mean CRPS objective); `tune_lightgbm_configs` adds a `separate` toggle for tuning the univariate and covariate `DartsLightGBMPredictor` variants independently vs. sharing one config. See `docs/lightgbm-quantile-tuning-guide.md`. |
 
 ### LLM Processes
 
