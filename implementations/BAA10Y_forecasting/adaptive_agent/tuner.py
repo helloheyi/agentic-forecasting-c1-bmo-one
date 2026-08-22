@@ -1,7 +1,10 @@
-""" BAA10Y parameter-tuning backtest runner."""
+"""BAA10Y parameter-tuning backtest runner."""
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +20,11 @@ from BAA10Y_forecasting import (
     build_baa10y_multivariate_service,
 )
 from BAA10Y_forecasting.predictors.adaptive_candidates import (
-    list_adaptive_candidates,
     build_adaptive_predictor,
     get_adaptive_candidate,
+    list_adaptive_candidates,
 )
- 
+
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -41,11 +44,63 @@ PREDICTIONS_DIR = (
 
 SPEC_FILES = {
     "smoke": "baa10y_smoke.yaml",
+    "tune_2025": "baa10y_tune_2025.yaml",
+    "validate_2025": "baa10y_validate_2025.yaml",
     "backtest_2025": "baa10y_backtest_2025.yaml",
     "stress_2020": "baa10y_stress_2020.yaml",
 }
 
-VALID_HORIZONS = {1, 5, 21}
+VALID_HORIZONS = {
+    1,
+    5,
+    21,
+}
+
+VALID_METHODS = {
+    "linear_regression",
+    "lightgbm",
+    "llmp_sampled_trajectory",
+}
+
+# HYOAS is not included yet because the current dynamic tuner only
+# builds target-only and default-covariate data services.
+VALID_COVARIATE_PANELS = {
+    "target_only",
+    "default",
+}
+
+
+def dynamic_candidate_id(
+    *,
+    method: str,
+    covariate_panel: str,
+    parameters: dict[str, Any],
+) -> str:
+    """Create a reproducible ID from dynamically supplied parameters."""
+
+    payload = {
+        "method": method,
+        "covariate_panel": covariate_panel,
+        "parameters": parameters,
+    }
+
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+    parameter_hash = hashlib.sha256(
+        encoded.encode("utf-8")
+    ).hexdigest()[:12]
+
+    return (
+        f"{method}_"
+        f"{covariate_panel}_"
+        f"{parameter_hash}"
+    )
+
 
 def crps_improvement_pct(
     *,
@@ -63,18 +118,16 @@ def crps_improvement_pct(
         / baseline_crps
     )
 
+
 class BAA10YTuner:
-    """Run one parameter candidate against one BAA10Y horizon."""
+    """Run parameter configurations against one BAA10Y horizon."""
 
     def list_candidates(
         self,
         method: str | None = None,
         horizon: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Return available parameter candidates."""
-
-        # Imported lazily because adaptive_candidates.py
-        # will be created later.
+        """Return the existing fixed parameter candidates."""
 
         return list_adaptive_candidates(
             method=method,
@@ -88,7 +141,94 @@ class BAA10YTuner:
         experiment: str = "smoke",
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        """Run one tuning candidate and return its backtest result."""
+        """Run one fixed candidate from adaptive_candidates.py."""
+
+        candidate = get_adaptive_candidate(
+            candidate_id
+        )
+
+        return self._run_candidate(
+            candidate_id=candidate_id,
+            candidate=candidate,
+            horizon=horizon,
+            experiment=experiment,
+            force_refresh=force_refresh,
+        )
+
+    def run_parameter_trial(
+        self,
+        *,
+        method: str,
+        horizon: int,
+        covariate_panel: str,
+        parameters: dict[str, Any],
+        experiment: str = "smoke",
+        force_refresh: bool = False,
+        is_baseline: bool = False,
+    ) -> dict[str, Any]:
+        """Run a dynamically supplied parameter configuration."""
+
+        if method not in VALID_METHODS:
+            raise ValueError(
+                f"Unsupported method: {method}. "
+                f"Expected one of "
+                f"{sorted(VALID_METHODS)}."
+            )
+
+        if (
+            covariate_panel
+            not in VALID_COVARIATE_PANELS
+        ):
+            raise ValueError(
+                "Unsupported covariate panel: "
+                f"{covariate_panel}. Expected one of "
+                f"{sorted(VALID_COVARIATE_PANELS)}."
+            )
+
+        resolved_parameters = copy.deepcopy(
+            parameters
+        )
+
+        candidate_id = dynamic_candidate_id(
+            method=method,
+            covariate_panel=covariate_panel,
+            parameters=resolved_parameters,
+        )
+
+        candidate = {
+            "candidate_id": candidate_id,
+            "method": method,
+            "description": (
+                "Dynamically generated parameter trial"
+            ),
+            "params": resolved_parameters,
+            "covariate_panel": covariate_panel,
+            "allowed_horizons": [horizon],
+            "is_baseline": is_baseline,
+        }
+
+        return self._run_candidate(
+            candidate_id=candidate_id,
+            candidate=candidate,
+            horizon=horizon,
+            experiment=experiment,
+            force_refresh=force_refresh,
+        )
+
+    def _run_candidate(
+        self,
+        *,
+        candidate_id: str,
+        candidate: dict[str, Any],
+        horizon: int,
+        experiment: str,
+        force_refresh: bool,
+    ) -> dict[str, Any]:
+        """Execute one resolved candidate configuration."""
+
+        # ---------------------------------------------------------------
+        # Validate the request
+        # ---------------------------------------------------------------
 
         if horizon not in VALID_HORIZONS:
             raise ValueError(
@@ -97,30 +237,48 @@ class BAA10YTuner:
 
         if experiment not in SPEC_FILES:
             raise ValueError(
-                "experiment must be smoke, "
-                "backtest_2025, or stress_2020"
+                "Unsupported experiment: "
+                f"{experiment}. Expected one of "
+                f"{sorted(SPEC_FILES)}."
             )
 
+        if (
+            candidate["method"]
+            not in VALID_METHODS
+        ):
+            raise ValueError(
+                "Unsupported candidate method: "
+                f"{candidate['method']}"
+            )
 
-        candidate = get_adaptive_candidate(
-            candidate_id
-        )
+        if (
+            candidate["covariate_panel"]
+            not in VALID_COVARIATE_PANELS
+        ):
+            raise ValueError(
+                "Unsupported candidate covariate panel: "
+                f"{candidate['covariate_panel']}"
+            )
 
-        if horizon not in candidate["allowed_horizons"]:
+        if (
+            horizon
+            not in candidate["allowed_horizons"]
+        ):
             raise ValueError(
                 f"{candidate_id} does not support "
                 f"horizon {horizon}"
             )
 
-        # Do not use LLMP on the pre-cutoff 2020 period.
+        # LLMP cannot be run on the pre-cutoff 2020 period.
         if (
             candidate["method"]
             == "llmp_sampled_trajectory"
             and experiment == "stress_2020"
         ):
             raise ValueError(
-                "LLMP cannot be tested on stress_2020 "
-                "because it is before the model cutoff."
+                "LLMP cannot be tested on "
+                "stress_2020 because it is "
+                "before the model cutoff."
             )
 
         # ---------------------------------------------------------------
@@ -141,7 +299,9 @@ class BAA10YTuner:
                 )
             )
 
-        task_id = f"baa10y_change_{horizon}b"
+        task_id = (
+            f"baa10y_change_{horizon}b"
+        )
 
         selected_tasks = [
             task
@@ -151,20 +311,24 @@ class BAA10YTuner:
 
         if not selected_tasks:
             raise ValueError(
-                f"Task {task_id} not found in {spec_path}"
+                f"Task {task_id} not found "
+                f"in {spec_path}"
             )
 
-        single_horizon_spec = full_spec.model_copy(
-            update={
-                "spec_id": (
-                    f"{full_spec.spec_id}_h{horizon}"
-                ),
-                "tasks": selected_tasks,
-            }
+        single_horizon_spec = (
+            full_spec.model_copy(
+                update={
+                    "spec_id": (
+                        f"{full_spec.spec_id}"
+                        f"_h{horizon}"
+                    ),
+                    "tasks": selected_tasks,
+                }
+            )
         )
 
         # ---------------------------------------------------------------
-        # Build target and covariate data
+        # Build the target and covariate data service
         # ---------------------------------------------------------------
 
         use_covariates = (
@@ -173,7 +337,9 @@ class BAA10YTuner:
         )
 
         requested_covariates = (
-            list(DEFAULT_COVARIATE_SERIES_IDS)
+            list(
+                DEFAULT_COVARIATE_SERIES_IDS
+            )
             if use_covariates
             else []
         )
@@ -192,18 +358,19 @@ class BAA10YTuner:
             )
         )
 
-        registered = set(
+        registered_series = set(
             data_service.series_ids
         )
 
         available_covariates = [
             series_id
-            for series_id in requested_covariates
-            if series_id in registered
+            for series_id
+            in requested_covariates
+            if series_id in registered_series
         ]
 
         # ---------------------------------------------------------------
-        # Build the configured predictor
+        # Build the predictor
         # ---------------------------------------------------------------
 
         predictor = build_adaptive_predictor(
@@ -231,21 +398,31 @@ class BAA10YTuner:
             force_refresh=force_refresh,
         )
 
-        result = results.get(task_id)
+        result = results.get(
+            task_id
+        )
 
         if result is None:
             raise RuntimeError(
-                f"No backtest result returned for {task_id}"
+                "No backtest result returned "
+                f"for {task_id}"
             )
 
-        # Return a simple JSON-compatible dictionary.
+        # ---------------------------------------------------------------
+        # Return a JSON-compatible result
+        # ---------------------------------------------------------------
+
         return {
             "candidate_id": candidate_id,
-            "predictor_id": predictor.predictor_id,
+            "predictor_id": (
+                predictor.predictor_id
+            ),
             "method": candidate["method"],
             "horizon": horizon,
             "experiment": experiment,
-            "parameters": candidate["params"],
+            "parameters": copy.deepcopy(
+                candidate["params"]
+            ),
             "covariate_panel": candidate[
                 "covariate_panel"
             ],
@@ -261,8 +438,14 @@ class BAA10YTuner:
             "skipped_origins": int(
                 result.skipped_origins
             ),
-            "ran_at": result.ran_at.isoformat(),
+            "ran_at": (
+                result.ran_at.isoformat()
+            ),
         }
 
 
-__all__ = ["BAA10YTuner"]
+__all__ = [
+    "BAA10YTuner",
+    "crps_improvement_pct",
+    "dynamic_candidate_id",
+]

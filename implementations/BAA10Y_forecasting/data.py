@@ -48,7 +48,7 @@ import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from hyoas_proxy import (
+from .hyoas_proxy import (
         DGS3_FRED_ID,
         HYOAS_FRED_ID,
         HYG_TICKER,

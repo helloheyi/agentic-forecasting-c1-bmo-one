@@ -652,6 +652,11 @@ def build_baa10y_multitask_news_config(
                 verifier_confidence_threshold
             ),
         ),
+            code_execution=CodeExecutionConfig(enabled=True),
+            skills_dirs=[
+            _SKILLS_ROOT / "statistical-analysis",
+            _SKILLS_ROOT / "credit-driver-analysis",
+            ],
         function_tools=[
             FunctionTool(
                 func=load_baa10y_analysis_payload
