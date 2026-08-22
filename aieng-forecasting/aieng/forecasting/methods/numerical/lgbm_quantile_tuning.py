@@ -117,6 +117,23 @@ _DEFAULT_PARAM_RANGES: dict[str, ParamRange] = {
 }
 
 
+def _resolve_lgbm_kwargs(base_lgbm_kwargs: dict[str, Any] | None, n_jobs: int) -> dict[str, Any]:
+    """Cap LightGBM's own ``num_threads`` when trials run concurrently.
+
+    When ``n_jobs != 1``, Optuna runs multiple trials at once; if each
+    trial's LightGBM fits are left at their default ``num_threads`` (every
+    logical core), concurrent trials oversubscribe the same cores —
+    typically slower than running sequentially. Trial-level parallelism is
+    the better lever for this workload's fit sizes (see
+    docs/lightgbm-quantile-tuning-guide.md §6), so ``num_threads`` is capped
+    to 1 here unless the caller already set it explicitly.
+    """
+    kwargs = dict(base_lgbm_kwargs or {})
+    if n_jobs != 1:
+        kwargs.setdefault("num_threads", 1)
+    return kwargs
+
+
 class TuningResult(BaseModel):
     """Outcome of one Optuna study tuning one LightGBM predictor variant.
 
@@ -167,6 +184,7 @@ def tune_lightgbm_quantile_config(
     base_lgbm_kwargs: dict[str, Any] | None = None,
     param_ranges: dict[str, ParamRange] | None = None,
     n_trials: int = 30,
+    n_jobs: int = 1,
     num_samples: int = 200,
     stride: int = 1,
     warmup: int = 0,
@@ -220,6 +238,15 @@ def tune_lightgbm_quantile_config(
         :data:`_DEFAULT_PARAM_RANGES`.
     n_trials : int, default=30
         Number of Optuna trials.
+    n_jobs : int, default=1
+        Number of trials to run concurrently (forwarded to
+        ``study.optimize``). This workload's real parallelism lives across
+        trials (thousands of small, independent LightGBM fits), not inside
+        any single fit, so this is the lever to raise for speed — see
+        docs/lightgbm-quantile-tuning-guide.md §6. When ``n_jobs != 1``,
+        each fit's own ``num_threads`` is capped to 1 (unless already set in
+        ``base_lgbm_kwargs``) to avoid concurrent trials oversubscribing the
+        same cores.
     num_samples : int, default=200
         Monte Carlo samples per trial's predictor. Deliberately smaller than
         a production predictor's ``num_samples`` (e.g. 500) — tuning only
@@ -254,6 +281,7 @@ def tune_lightgbm_quantile_config(
     validation_start = (pd.Timestamp(validation_end) - offset * validation_window).to_pydatetime()
     validation_spec = BacktestSpec(task=task, start=validation_start, end=validation_end, stride=stride, warmup=warmup)
     ranges = param_ranges or _DEFAULT_PARAM_RANGES
+    effective_lgbm_kwargs = _resolve_lgbm_kwargs(base_lgbm_kwargs, n_jobs)
 
     def _objective(trial: "optuna.Trial") -> float:
         coefficients = {
@@ -271,7 +299,7 @@ def tune_lightgbm_quantile_config(
             lags_past_covariates=lags_past_covariates,
             covariate_series_ids=covariate_series_ids,
             num_samples=num_samples,
-            lgbm_kwargs=base_lgbm_kwargs,
+            lgbm_kwargs=effective_lgbm_kwargs,
             per_quantile_kwargs=per_quantile_kwargs,
         )
         try:
@@ -281,7 +309,7 @@ def tune_lightgbm_quantile_config(
         return result.mean_score
 
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(_objective, n_trials=n_trials)
+    study.optimize(_objective, n_trials=n_trials, n_jobs=n_jobs)
 
     best_coefficients = {
         name: (study.best_trial.params[f"{name}_base"], study.best_trial.params[f"{name}_slope"])
@@ -311,6 +339,7 @@ def tune_lightgbm_configs(
     base_lgbm_kwargs: dict[str, Any] | None = None,
     separate: bool = True,
     n_trials: int = 30,
+    n_jobs: int = 1,
     validation_window: int = 60,
     num_samples: int = 200,
     param_ranges: dict[str, ParamRange] | None = None,
@@ -355,6 +384,7 @@ def tune_lightgbm_configs(
         "base_lgbm_kwargs": base_lgbm_kwargs,
         "param_ranges": param_ranges,
         "n_trials": n_trials,
+        "n_jobs": n_jobs,
         "validation_window": validation_window,
         "num_samples": num_samples,
         "seed": seed,

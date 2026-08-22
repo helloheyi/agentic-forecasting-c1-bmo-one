@@ -198,6 +198,21 @@ predictor) — tuning only needs CRPS *ranking* between candidate configs to be
 stable, not final-answer calibration precision, so a smaller Monte Carlo
 sample keeps each trial cheaper.
 
+**Parallelism: raise `n_jobs`, not LightGBM's `num_threads`.** The real
+parallelism in this workload is *across* the ~23,400+ independent booster
+fits (trials × origins × quantiles), not *within* any single fit — each fit
+is only ~6,500 rows × ~60 columns for BAA10Y-scale data, too small for
+LightGBM's own thread-level parallelism to buy much. `tune_lightgbm_quantile_config(..., n_jobs=N)`
+runs `N` trials concurrently via Optuna (this works despite Python's GIL
+because LightGBM's `fit()` is a native call that releases it). Whenever
+`n_jobs != 1`, each fit's own `num_threads` is automatically capped to 1
+(unless already set in `base_lgbm_kwargs`) — otherwise `N` concurrent trials
+would each try to claim every core, oversubscribing and typically running
+*slower* than sequential. Set `n_jobs` to roughly the number of available
+CPU cores; for scaling beyond one machine, Optuna's storage-backed
+multi-process pattern (separate worker processes against a shared RDB) is
+the more robust upgrade path.
+
 ---
 
 ## 7. How to call it

@@ -27,6 +27,7 @@ from aieng.forecasting.methods.numerical.darts_regression import (
 from aieng.forecasting.methods.numerical.lgbm_quantile_tuning import (
     TuningResult,
     _expand_to_per_quantile,
+    _resolve_lgbm_kwargs,
     _tail_distance,
     tune_lightgbm_configs,
     tune_lightgbm_quantile_config,
@@ -124,6 +125,24 @@ def test_expand_to_per_quantile_int_rounding_and_floor() -> None:
     for kwargs in per_quantile.values():
         assert isinstance(kwargs["num_leaves"], int)
         assert kwargs["num_leaves"] >= 2  # _PARAM_MINIMUMS floor
+
+
+# --- num_threads / n_jobs interaction -----------------------------------------
+
+
+def test_resolve_lgbm_kwargs_caps_threads_when_parallel() -> None:
+    """n_jobs != 1 with no explicit num_threads gets capped to 1."""
+    assert _resolve_lgbm_kwargs(None, n_jobs=4) == {"num_threads": 1}
+
+
+def test_resolve_lgbm_kwargs_leaves_sequential_untouched() -> None:
+    """n_jobs=1 (sequential) does not inject num_threads at all."""
+    assert _resolve_lgbm_kwargs({"objective": "quantile"}, n_jobs=1) == {"objective": "quantile"}
+
+
+def test_resolve_lgbm_kwargs_respects_explicit_num_threads() -> None:
+    """A caller-supplied num_threads is never overridden."""
+    assert _resolve_lgbm_kwargs({"num_threads": 4}, n_jobs=8) == {"num_threads": 4}
 
 
 # --- _PerQuantileLightGBMModel mixin ------------------------------------------
