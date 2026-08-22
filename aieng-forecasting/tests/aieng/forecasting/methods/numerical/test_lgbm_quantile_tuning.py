@@ -232,6 +232,20 @@ def test_tune_lightgbm_configs_separate_runs_two_studies(mocker, task: Forecasti
     assert result["covariate"].predictor_variant == "covariate"
 
 
+def test_tune_lightgbm_configs_forwards_stride_and_warmup(mocker, task: ForecastingTask, svc: DataService) -> None:
+    """stride/warmup reach the inner tuner (dropped when n_jobs was added)."""
+    mock_tune = mocker.patch(
+        "aieng.forecasting.methods.numerical.lgbm_quantile_tuning.tune_lightgbm_quantile_config",
+        return_value=_canned_result("univariate"),
+    )
+    tune_lightgbm_configs(
+        task=task, data_service=svc, validation_end=datetime(2015, 1, 1),
+        covariate_series_ids=["cov"], separate=False, stride=5, warmup=100,
+    )
+    assert mock_tune.call_args.kwargs["stride"] == 5
+    assert mock_tune.call_args.kwargs["warmup"] == 100
+
+
 # --- No-leakage guard ----------------------------------------------------------
 
 

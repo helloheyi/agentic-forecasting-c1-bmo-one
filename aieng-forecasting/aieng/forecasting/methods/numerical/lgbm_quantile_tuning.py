@@ -342,6 +342,8 @@ def tune_lightgbm_configs(
     n_jobs: int = 1,
     validation_window: int = 60,
     num_samples: int = 200,
+    stride: int = 1,
+    warmup: int = 0,
     param_ranges: dict[str, ParamRange] | None = None,
     seed: int | None = None,
     cutoff: datetime | None = None,
@@ -387,6 +389,8 @@ def tune_lightgbm_configs(
         "n_jobs": n_jobs,
         "validation_window": validation_window,
         "num_samples": num_samples,
+        "stride": stride,
+        "warmup": warmup,
         "seed": seed,
         "cutoff": cutoff,
     }
