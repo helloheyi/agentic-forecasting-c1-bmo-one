@@ -46,27 +46,28 @@ TREE_SHAPES = {
     },
 }
 MAX_TOTAL_TRIALS = 18
+MAX_LLMP_TRIALS = 12
 
 
-FOCUS_TEMPLATES = {
+MAX_LIGHTGBM_TRIALS = 18
+MAX_LLMP_TRIALS = 12
+
+
+LIGHTGBM_FOCUS_TEMPLATES = {
     "broad_search": [],
 
     "continue_tpe": [],
 
     "reduce_complexity": [
         {
-            "tree_shape": (
-                "depth3_leaves7"
-            ),
+            "tree_shape": "depth3_leaves7",
         },
         {
-            "tree_shape": (
-                "depth4_leaves15"
-            ),
+            "tree_shape": "depth4_leaves15",
         },
     ],
 
-    "increase_regularization": [
+    "regularize_more": [
         {
             "reg_alpha": 0.5,
             "reg_lambda": 2.0,
@@ -77,38 +78,17 @@ FOCUS_TEMPLATES = {
         },
     ],
 
-    "lower_learning_rate": [
+    "stabilize_boosting": [
         {
             "learning_rate": 0.03,
+            "n_estimators": 300,
         },
         {
             "learning_rate": 0.05,
-        },
-    ],
-
-    "focus_short_lags": [
-        {
-            "lags": 3,
-            "lags_past_covariates": 3,
-        },
-        {
-            "lags": 5,
-            "lags_past_covariates": 5,
-        },
-    ],
-
-    "focus_medium_lags": [
-        {
-            "lags": 5,
-            "lags_past_covariates": 5,
-        },
-        {
-            "lags": 10,
-            "lags_past_covariates": 10,
+            "n_estimators": 200,
         },
     ],
 }
-
 def suggest_lightgbm_parameters(
     trial: optuna.Trial,
     *,
@@ -235,12 +215,43 @@ LLMP_SEARCH_SPACE = {
     ],
 }
 
-LLMP_FOCUS_ACTIONS = {
-    "broad_search",
-    "increase_samples",
-    "shorter_history",
-    "longer_history",
-    "continue_grid",
+LLMP_FOCUS_TEMPLATES = {
+    "broad_search": [],
+
+    "continue_grid": [],
+
+    "increase_samples": [
+        {
+            "n_samples": 12,
+            "history_window": 48,
+        },
+        {
+            "n_samples": 16,
+            "history_window": 48,
+        },
+    ],
+
+    "shorter_history": [
+        {
+            "n_samples": 8,
+            "history_window": 32,
+        },
+        {
+            "n_samples": 12,
+            "history_window": 32,
+        },
+    ],
+
+    "longer_history": [
+        {
+            "n_samples": 8,
+            "history_window": 64,
+        },
+        {
+            "n_samples": 8,
+            "history_window": 96,
+        },
+    ],
 }
 
 
@@ -347,7 +358,6 @@ class BAA10YAdaptiveOptimizer:
             f"h{horizon}_"
             f"{experiment}"
         )
-
     def run_search(
         self,
         *,
@@ -359,66 +369,95 @@ class BAA10YAdaptiveOptimizer:
         reason: str = "",
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        
-        """Run or resume one adaptive Optuna smoke search.
+        """Run or resume a paired adaptive parameter search.
 
-        This first implementation supports LightGBM only. Smoke results
-        screen candidates but never authorize promotion.
+        LightGBM uses Optuna's TPE sampler. The sampled-trajectory
+        LLMP uses a bounded Optuna grid. Every candidate is evaluated
+        on both the development and inner-validation windows.
+
+        This method never accesses the independent validate_2025
+        experiment and never promotes a model.
         """
 
-        SUPPORTED_SEARCH_METHODS = {
+        supported_methods = {
             "lightgbm",
             "llmp_sampled_trajectory",
         }
 
-        if method not in SUPPORTED_SEARCH_METHODS:
+        supported_covariate_panels = {
+            "target_only",
+            "default",
+            "default_plus_hyoas",
+        }
+
+        if method not in supported_methods:
             raise ValueError(
-                f"Unsupported adaptive-search method: {method}. "
-                f"Expected one of "
-                f"{sorted(SUPPORTED_SEARCH_METHODS)}."
+                f"Unsupported method: {method}. "
+                f"Expected one of {sorted(supported_methods)}."
+            )
+
+        if horizon not in {1, 5, 21}:
+            raise ValueError(
+                "horizon must be 1, 5, or 21."
             )
 
         if (
-            method == "llmp_sampled_trajectory"
-            and max_trials > 12
+            covariate_panel
+            not in supported_covariate_panels
         ):
             raise ValueError(
-                "LLMP max_trials cannot exceed 12 "
-                "because its approved grid contains "
-                "12 configurations."
+                "Unsupported covariate panel: "
+                f"{covariate_panel}. Expected one of "
+                f"{sorted(supported_covariate_panels)}."
             )
 
-        if horizon not in {
-            1,
-            5,
-            21,
-        }:
-            raise ValueError(
-                "horizon must be 1, 5, or 21"
+        if method == "lightgbm":
+            maximum_allowed_trials = (
+                MAX_LIGHTGBM_TRIALS
             )
 
-        if covariate_panel not in {
-            "target_only",
-            "default",
-        }:
-            raise ValueError(
-                "covariate_panel must be "
-                "'target_only' or 'default'"
+            focus_templates = (
+                LIGHTGBM_FOCUS_TEMPLATES
             )
 
-        if focus_action not in FOCUS_TEMPLATES:
+            sampler = optuna.samplers.TPESampler(
+                seed=42,
+                n_startup_trials=5,
+            )
+
+            search_strategy = "optuna_tpe"
+
+        else:
+            maximum_allowed_trials = (
+                MAX_LLMP_TRIALS
+            )
+
+            focus_templates = (
+                LLMP_FOCUS_TEMPLATES
+            )
+
+            sampler = optuna.samplers.GridSampler(
+                search_space=LLMP_SEARCH_SPACE,
+                seed=42,
+            )
+
+            search_strategy = (
+                "optuna_grid_llmp"
+            )
+
+        if not 1 <= max_trials <= maximum_allowed_trials:
             raise ValueError(
-                "Unsupported focus_action: "
+                f"{method} max_trials must be between "
+                f"1 and {maximum_allowed_trials}."
+            )
+
+        if focus_action not in focus_templates:
+            raise ValueError(
+                f"Unsupported {method} focus_action: "
                 f"{focus_action}. Expected one of "
-                f"{sorted(FOCUS_TEMPLATES)}."
+                f"{sorted(focus_templates)}."
             )
 
-        if not 1 <= max_trials <= MAX_TOTAL_TRIALS:
-            raise ValueError(
-                "max_trials must be between "
-                f"1 and {MAX_TOTAL_TRIALS}."
-            )
-        
         experiment = "tune_paired_2025"
 
         study_name = self._study_name(
@@ -428,10 +467,25 @@ class BAA10YAdaptiveOptimizer:
             experiment=experiment,
         )
 
-        # ---------------------------------------------------------------
-        # Run and save the notebook 01 benchmark
-        # ---------------------------------------------------------------
+        # Do not continue changing parameters after the agent
+        # freezes the selected finalist.
+        state = self.store.load()
 
+        study_record = state.get_study(
+            study_name
+        )
+
+        if (
+            study_record is not None
+            and study_record.search_frozen
+        ):
+            raise RuntimeError(
+                f"Study {study_name} is frozen. "
+                "It cannot run additional tuning trials."
+            )
+
+        # Run the matching benchmark once on the same paired
+        # development and inner-validation periods.
         baseline_parameters = (
             get_benchmark_config(
                 method,
@@ -440,80 +494,35 @@ class BAA10YAdaptiveOptimizer:
         )
 
         baseline_result = (
-            self.tuner.run_parameter_trial(
+            self.tuner.run_paired_parameter_trial(
                 method=method,
                 horizon=horizon,
-                covariate_panel=(
-                    covariate_panel
-                ),
-                parameters=(
-                    baseline_parameters
-                ),
-                experiment=experiment,
+                covariate_panel=covariate_panel,
+                parameters=baseline_parameters,
                 force_refresh=force_refresh,
                 is_baseline=True,
             )
         )
 
-        baseline_result = (
-            self.tuner.run_paired_parameter_trial(
-                method=method,
-                horizon=horizon,
-                covariate_panel=(
-                    covariate_panel
-                ),
-                parameters=(
-                    baseline_parameters
-                ),
-                force_refresh=force_refresh,
-                is_baseline=True,
-            )
-        )
+        baseline_result.update({
+            "study_name": study_name,
+            "trial_number": None,
+            "parameter_hash": (
+                baseline_result[
+                    "candidate_id"
+                ].rsplit(
+                    "_",
+                    1,
+                )[-1]
+            ),
+            "search_strategy": search_strategy,
+        })
 
         baseline_trial, _ = (
             self.store.add_trial(
                 baseline_result
             )
         )
-
-        # ---------------------------------------------------------------
-        # Create or resume the Optuna study
-        # ---------------------------------------------------------------
-
-        if method == "lightgbm":
-            sampler = (
-                optuna.samplers.TPESampler(
-                    seed=42,
-                    n_startup_trials=5,
-                )
-            )
-
-            search_strategy = (
-                    search_strategy            
-                    )
-
-        elif (
-            method
-            == "llmp_sampled_trajectory"
-        ):
-            sampler = (
-                optuna.samplers.GridSampler(
-                    search_space=(
-                        LLMP_SEARCH_SPACE
-                    ),
-                    seed=42,
-                )
-            )
-
-            search_strategy = (
-                "optuna_grid_llmp"
-            )
-
-        else:
-            raise ValueError(
-                "No Optuna sampler is registered "
-                f"for method={method!r}."
-            )
 
         study = optuna.create_study(
             study_name=study_name,
@@ -523,26 +532,14 @@ class BAA10YAdaptiveOptimizer:
             load_if_exists=True,
         )
 
-        state = self.store.load()
-
-        study_record = state.get_study(
-            study_name
-        )
-
         if study_record is None:
             study_record = SearchStudyRecord(
                 study_name=study_name,
                 method=method,
                 horizon=horizon,
-                covariate_panel=(
-                    covariate_panel
-                ),
-                search_strategy=(
-                    "search_strategy"
-                ),
-                objective_experiment=(
-                    experiment
-                ),
+                covariate_panel=covariate_panel,
+                search_strategy=search_strategy,
+                objective_experiment=experiment,
                 validation_experiment=(
                     "validate_2025"
                 ),
@@ -550,10 +547,11 @@ class BAA10YAdaptiveOptimizer:
                 status="created",
             )
 
-        study_record.status = "running"
-        study_record.max_trials = (
-            max_trials
+        study_record.search_strategy = (
+            search_strategy
         )
+        study_record.status = "running"
+        study_record.max_trials = max_trials
         study_record.baseline_candidate_id = (
             baseline_trial.candidate_id
         )
@@ -565,21 +563,29 @@ class BAA10YAdaptiveOptimizer:
             study_record
         )
 
-        # ---------------------------------------------------------------
-        # Optuna objective
-        # ---------------------------------------------------------------
-
         def objective(
             trial: optuna.Trial,
         ) -> float:
-            parameters = (
-                suggest_lightgbm_parameters(
-                    trial,
-                    covariate_panel=(
-                        covariate_panel
-                    ),
+            """Evaluate one Optuna parameter suggestion."""
+
+            if method == "lightgbm":
+                parameters = (
+                    suggest_lightgbm_parameters(
+                        trial,
+                        covariate_panel=(
+                            covariate_panel
+                        ),
+                    )
                 )
-            )
+            else:
+                parameters = (
+                    suggest_llmp_parameters(
+                        trial,
+                        covariate_panel=(
+                            covariate_panel
+                        ),
+                    )
+                )
 
             result = (
                 self.tuner.run_paired_parameter_trial(
@@ -589,19 +595,14 @@ class BAA10YAdaptiveOptimizer:
                         covariate_panel
                     ),
                     parameters=parameters,
-                    experiment=experiment,
-                    force_refresh=(
-                        force_refresh
-                    ),
+                    force_refresh=force_refresh,
                     is_baseline=False,
                 )
             )
 
             result.update({
                 "study_name": study_name,
-                "trial_number": (
-                    trial.number
-                ),
+                "trial_number": trial.number,
                 "parameter_hash": (
                     result[
                         "candidate_id"
@@ -611,7 +612,7 @@ class BAA10YAdaptiveOptimizer:
                     )[-1]
                 ),
                 "search_strategy": (
-                    "search_strategy"
+                    search_strategy
                 ),
             })
 
@@ -625,121 +626,113 @@ class BAA10YAdaptiveOptimizer:
                 "candidate_id",
                 saved_trial.candidate_id,
             )
-
             trial.set_user_attr(
                 "predictor_id",
                 saved_trial.predictor_id,
             )
-
             trial.set_user_attr(
-                "mean_crps",
-                saved_trial.mean_crps,
+                "development_mean_crps",
+                saved_trial.development_mean_crps,
+            )
+            trial.set_user_attr(
+                "inner_validation_mean_crps",
+                saved_trial.inner_validation_mean_crps,
+            )
+            trial.set_user_attr(
+                "generalization_gap_pct",
+                saved_trial.generalization_gap_pct,
             )
 
+            # mean_crps is the inner-validation CRPS for
+            # a tune_paired_2025 TrialRecord.
             return float(
                 saved_trial.mean_crps
             )
 
-        # Run only the remaining number of trials when resuming.
         completed_before = sum(
-            trial.state
-            == TrialState.COMPLETE
+            trial.state == TrialState.COMPLETE
             for trial in study.trials
         )
 
         remaining_trials = max(
             0,
-            max_trials
-            - completed_before,
+            max_trials - completed_before,
         )
 
-        if (
-        remaining_trials > 0
-        and focus_action
-        not in {
-            "broad_search",
-            "continue_tpe",
-        }
-        ):
+        # The agent's focus action affects the order of the
+        # remaining parameter evaluations.
+        if remaining_trials > 0:
             templates = copy.deepcopy(
-            FOCUS_TEMPLATES[
-                focus_action
-            ]
-        )
-
-        for template in templates:
-            if (
-                covariate_panel
-                == "target_only"
-            ):
-                template.pop(
-                    "lags_past_covariates",
-                    None,
-                )
-
-            study.enqueue_trial(
-                template,
-                skip_if_exists=True,
+                focus_templates[
+                    focus_action
+                ]
             )
 
+            for template in templates:
+                if (
+                    method == "lightgbm"
+                    and covariate_panel
+                    == "target_only"
+                ):
+                    template.pop(
+                        "lags_past_covariates",
+                        None,
+                    )
 
-        
+                study.enqueue_trial(
+                    template,
+                    skip_if_exists=True,
+                )
 
-
-
-
-        if remaining_trials > 0:
             study.optimize(
                 objective,
                 n_trials=remaining_trials,
             )
 
-        # ---------------------------------------------------------------
-        # Collect the best completed trial
-        # ---------------------------------------------------------------
-
         completed_trials = [
             trial
             for trial in study.trials
-            if (
-                trial.state
-                == TrialState.COMPLETE
-            )
+            if trial.state
+            == TrialState.COMPLETE
         ]
 
-
-        if (
-            remaining_trials > 0
-            and focus_action
-            != "broad_search"
-        ):
+        if remaining_trials > 0:
             study_record.agent_actions.append({
+                "action_type": (
+                    "parameter_search"
+                ),
                 "focus_action": focus_action,
-                "reason": reason,
+                "reason": (
+                    reason
+                    or "Run the bounded adaptive search."
+                ),
                 "completed_before": (
                     completed_before
+                ),
+                "completed_after": (
+                    len(completed_trials)
                 ),
                 "requested_total_trials": (
                     max_trials
                 ),
             })
 
-
         if not completed_trials:
             study_record.status = "failed"
+
             self.store.upsert_study(
                 study_record
             )
 
             raise RuntimeError(
-                "Optuna did not complete "
-                "any candidate trials."
+                "Optuna did not complete any "
+                "candidate trials."
             )
 
         best_optuna_trial = min(
             completed_trials,
-            key=lambda trial: float(
-                trial.value
+            key=lambda item: float(
+                item.value
             ),
         )
 
@@ -751,8 +744,8 @@ class BAA10YAdaptiveOptimizer:
 
         if not best_candidate_id:
             raise RuntimeError(
-                "The best Optuna trial does "
-                "not contain a candidate ID."
+                "The best Optuna trial does not "
+                "contain a candidate ID."
             )
 
         updated_state = self.store.load()
@@ -762,9 +755,7 @@ class BAA10YAdaptiveOptimizer:
                 method=method,
                 horizon=horizon,
                 experiment=experiment,
-                candidate_id=(
-                    best_candidate_id
-                ),
+                candidate_id=best_candidate_id,
                 covariate_panel=(
                     covariate_panel
                 ),
@@ -774,35 +765,34 @@ class BAA10YAdaptiveOptimizer:
 
         if not best_records:
             raise RuntimeError(
-                "The best Optuna result was "
-                "not found in tuning state."
+                "The best Optuna result was not "
+                "found in tuning state."
             )
 
         best_trial = best_records[-1]
 
         improvement_pct = (
-            100.0
-            * (
-                baseline_trial.mean_crps
-                - best_trial.mean_crps
+            crps_improvement_pct(
+                baseline_crps=(
+                    baseline_trial.mean_crps
+                ),
+                candidate_crps=(
+                    best_trial.mean_crps
+                ),
             )
-            / baseline_trial.mean_crps
         )
 
-        if improvement_pct > 0:
+        if (
+            improvement_pct is not None
+            and improvement_pct > 0
+        ):
             decision = (
-                "advance_best_candidate_"
-                "to_validate_2025"
+                "review_paired_diagnostics"
             )
         else:
             decision = (
-                "retain_baseline_after_"
-                "tuning"
+                "retain_baseline_or_continue_search"
             )
-
-        # ---------------------------------------------------------------
-        # Save the completed study summary
-        # ---------------------------------------------------------------
 
         study_record.status = "completed"
         study_record.completed_trials = len(
@@ -824,10 +814,6 @@ class BAA10YAdaptiveOptimizer:
             study_record
         )
 
-        # ---------------------------------------------------------------
-        # Return the search history
-        # ---------------------------------------------------------------
-
         final_state = self.store.load()
 
         history = final_state.find_trials(
@@ -842,17 +828,6 @@ class BAA10YAdaptiveOptimizer:
 
         history_rows = [
             {
-                "development_crps": (
-                    trial.development_mean_crps
-                ),
-
-                "inner_validation_crps": (
-                    trial.inner_validation_mean_crps
-                ),
-
-                "generalization_gap_pct": (
-                    trial.generalization_gap_pct
-                ),
                 "trial_number": (
                     trial.trial_number
                 ),
@@ -862,20 +837,28 @@ class BAA10YAdaptiveOptimizer:
                 "is_baseline": (
                     trial.is_baseline
                 ),
-                "mean_crps": (
-                    trial.mean_crps
+                "development_crps": (
+                    trial.development_mean_crps
                 ),
-                "parameters": (
-                    trial.parameters
+                "inner_validation_crps": (
+                    trial.inner_validation_mean_crps
                 ),
+                "generalization_gap_pct": (
+                    trial.generalization_gap_pct
+                ),
+                "mean_crps": trial.mean_crps,
+                "parameters": trial.parameters,
             }
             for trial in sorted(
                 history,
                 key=lambda item: (
-                    item.trial_number
-                    if item.trial_number
-                    is not None
-                    else 999999
+                    0 if item.is_baseline else 1,
+                    (
+                        item.trial_number
+                        if item.trial_number
+                        is not None
+                        else -1
+                    ),
                 ),
             )
         ]
@@ -888,7 +871,7 @@ class BAA10YAdaptiveOptimizer:
                 covariate_panel
             ),
             "search_strategy": (
-                "search_strategy"
+                search_strategy
             ),
             "experiment": experiment,
             "candidate_trials_completed": (
@@ -923,13 +906,146 @@ class BAA10YAdaptiveOptimizer:
                 improvement_pct
             ),
             "decision": decision,
+            "search_frozen": (
+                study_record.search_frozen
+            ),
             "promotion_allowed": False,
             "promotion_block_reason": (
-                 "Tune-period evidence cannot "
-                 "promote a model. Confirm the "
-                "candidate on backtest_2025."
+                "Paired tuning evidence cannot "
+                "promote a model. The agent must "
+                "review diagnostics, freeze a "
+                "finalist, and then evaluate it on "
+                "validate_2025."
             ),
             "trial_history": history_rows,
+        }
+
+    def freeze_search_candidate(
+        self,
+        *,
+        study_name: str,
+        candidate_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Freeze one robust candidate before outer validation.
+
+        A candidate cannot be frozen when paired diagnostics mark
+        it as possible overfitting or when it fails to improve the
+        matching baseline on the inner-validation period.
+        """
+
+        diagnostics = self.get_search_diagnostics(
+            study_name=study_name
+        )
+
+        selected_diagnostic = next(
+            (
+                row
+                for row
+                in diagnostics[
+                    "trial_diagnostics"
+                ]
+                if row["candidate_id"]
+                == candidate_id
+            ),
+            None,
+        )
+
+        if selected_diagnostic is None:
+            raise ValueError(
+                "Candidate does not belong to "
+                f"study {study_name}: {candidate_id}"
+            )
+
+        if not selected_diagnostic[
+            "robust_candidate"
+        ]:
+            raise ValueError(
+                "Candidate cannot be frozen because "
+                "it either failed to improve inner "
+                "validation or shows possible "
+                "overfitting."
+            )
+
+        state = self.store.load()
+
+        study_record = state.get_study(
+            study_name
+        )
+
+        if study_record is None:
+            raise ValueError(
+                f"Unknown study: {study_name}"
+            )
+
+        matching_trials = state.find_trials(
+            method=study_record.method,
+            horizon=study_record.horizon,
+            experiment="tune_paired_2025",
+            candidate_id=candidate_id,
+            covariate_panel=(
+                study_record.covariate_panel
+            ),
+            study_name=study_name,
+        )
+
+        if not matching_trials:
+            raise RuntimeError(
+                "The selected trial was not found "
+                "in tuning state."
+            )
+
+        selected_trial = matching_trials[-1]
+
+        study_record.best_candidate_id = (
+            candidate_id
+        )
+        study_record.best_mean_crps = (
+            selected_trial.mean_crps
+        )
+        study_record.best_parameters = (
+            copy.deepcopy(
+                selected_trial.parameters
+            )
+        )
+        study_record.search_frozen = True
+        study_record.validation_decision = (
+            "pending_validation"
+        )
+
+        study_record.agent_actions.append({
+            "action_type": "freeze_candidate",
+            "candidate_id": candidate_id,
+            "reason": reason,
+            "development_crps": (
+                selected_trial
+                .development_mean_crps
+            ),
+            "inner_validation_crps": (
+                selected_trial
+                .inner_validation_mean_crps
+            ),
+            "generalization_gap_pct": (
+                selected_trial
+                .generalization_gap_pct
+            ),
+        })
+
+        self.store.upsert_study(
+            study_record
+        )
+
+        return {
+            "status": "frozen",
+            "study_name": study_name,
+            "candidate_id": candidate_id,
+            "parameters": (
+                selected_trial.parameters
+            ),
+            "validation_experiment": (
+                "validate_2025"
+            ),
+            "promotion_allowed": False,
         }
     def get_search_diagnostics(
         self,
@@ -949,6 +1065,14 @@ class BAA10YAdaptiveOptimizer:
                 f"Unknown study: {study_name}"
             )
 
+        if study_record.method == "lightgbm":
+            focus_templates = (
+                LIGHTGBM_FOCUS_TEMPLATES
+            )
+        else:
+            focus_templates = (
+                LLMP_FOCUS_TEMPLATES
+            )
         trials = state.find_trials(
             method=study_record.method,
             horizon=study_record.horizon,
@@ -1049,6 +1173,14 @@ class BAA10YAdaptiveOptimizer:
                 or gap_deterioration
             )
 
+            robust_candidate = (
+                validation_improvement
+                is not None
+                and validation_improvement > 0
+                and not possible_overfitting
+            )
+
+
             diagnostics.append({
                 "trial_number": (
                     trial.trial_number
@@ -1077,6 +1209,11 @@ class BAA10YAdaptiveOptimizer:
                 "possible_overfitting": (
                     possible_overfitting
                 ),
+
+                "robust_candidate": (
+                    robust_candidate
+                ),
+
                 "parameters": (
                     trial.parameters
                 ),
@@ -1113,13 +1250,22 @@ class BAA10YAdaptiveOptimizer:
                 study_record.agent_actions
             ),
             "allowed_focus_actions": (
-                list(FOCUS_TEMPLATES)
+                list(focus_templates)
+            ),
+            "search_frozen": (
+                study_record.search_frozen
+            ),
+            "validation_decision": (
+                study_record.validation_decision
             ),
         }
 
 
 __all__ = [
     "BAA10YAdaptiveOptimizer",
+    "LIGHTGBM_FOCUS_TEMPLATES",
+    "LLMP_FOCUS_TEMPLATES",
+    "LLMP_SEARCH_SPACE",
     "suggest_lightgbm_parameters",
-    "LLMP_SEARCH_SPACE"
+    "suggest_llmp_parameters",
 ]

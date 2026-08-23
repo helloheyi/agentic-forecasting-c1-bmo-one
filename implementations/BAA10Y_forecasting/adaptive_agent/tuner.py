@@ -17,8 +17,10 @@ from aieng.forecasting.evaluation import (
 
 from BAA10Y_forecasting import (
     DEFAULT_COVARIATE_SERIES_IDS,
+    HYOAS_OPTIONAL_COVARIATE_SERIES_IDS,
     build_baa10y_multivariate_service,
 )
+
 from BAA10Y_forecasting.predictors.adaptive_candidates import (
     build_adaptive_predictor,
     get_adaptive_candidate,
@@ -53,9 +55,6 @@ SPEC_FILES = {
     "validate_2025": (
         "baa10y_validate_2025.yaml"
     ),
-    "backtest_2025": (
-        "baa10y_backtest_2025.yaml"
-    ),
     "stress_2020": (
         "baa10y_stress_2020.yaml"
     ),
@@ -78,8 +77,44 @@ VALID_METHODS = {
 VALID_COVARIATE_PANELS = {
     "target_only",
     "default",
+    "default_plus_hyoas",
 }
 
+
+def resolve_covariate_series_ids(
+    covariate_panel: str,
+) -> list[str]:
+    """Resolve one named covariate panel into exact series IDs.
+
+    The returned list is deterministic. The default_plus_hyoas
+    panel contains every default covariate plus both approved HYOAS
+    features: the observed HYOAS change and the HYG-DGS3 proxy.
+    """
+
+    if covariate_panel == "target_only":
+        return []
+
+    if covariate_panel == "default":
+        return list(
+            DEFAULT_COVARIATE_SERIES_IDS
+        )
+
+    if (
+        covariate_panel
+        == "default_plus_hyoas"
+    ):
+        return list(
+            dict.fromkeys([
+                *DEFAULT_COVARIATE_SERIES_IDS,
+                *HYOAS_OPTIONAL_COVARIATE_SERIES_IDS,
+            ])
+        )
+
+    raise ValueError(
+        "Unsupported covariate panel: "
+        f"{covariate_panel}. Expected one of "
+        f"{sorted(VALID_COVARIATE_PANELS)}."
+    )
 
 def dynamic_candidate_id(
     *,
@@ -236,8 +271,15 @@ class BAA10YTuner:
         force_refresh: bool = False,
         is_baseline: bool = False,
     ) -> dict[str, Any]:
-        """Evaluate one configuration on two tuning periods."""
+        """Evaluate one configuration on two leak-separated tuning periods.
 
+        The development and inner-validation CRPS values are both returned.
+        Optuna minimizes inner-validation CRPS, while the adaptive agent
+        compares both periods to identify possible parameter overfitting.
+
+        These are two time-series backtest periods, not LightGBM's internal
+        training and validation losses.
+        """
         development_result = (
             self.run_parameter_trial(
                 method=method,
@@ -451,28 +493,33 @@ class BAA10YTuner:
         # ---------------------------------------------------------------
         # Build the target and covariate data service
         # ---------------------------------------------------------------
-
-        use_covariates = (
-            candidate["covariate_panel"]
-            == "default"
-        )
+        covariate_panel = candidate[
+            "covariate_panel"
+        ]
 
         requested_covariates = (
-            list(
-                DEFAULT_COVARIATE_SERIES_IDS
+            resolve_covariate_series_ids(
+                covariate_panel
             )
-            if use_covariates
-            else []
+        )
+
+        use_covariates = bool(
+            requested_covariates
         )
 
         data_service = (
             build_baa10y_multivariate_service(
                 windows=(1, 5, 21),
-                include_covariates=use_covariates,
+                include_covariates=(
+                    use_covariates
+                ),
                 covariate_series_ids=(
                     requested_covariates
-                    if requested_covariates
+                    if use_covariates
                     else None
+                ),
+                strict_covariates=(
+                    use_covariates
                 ),
                 start="2016-01-01",
                 refresh=False,
@@ -483,12 +530,27 @@ class BAA10YTuner:
             data_service.series_ids
         )
 
-        available_covariates = [
+        missing_covariates = [
             series_id
             for series_id
             in requested_covariates
-            if series_id in registered_series
+            if series_id
+            not in registered_series
         ]
+
+        if missing_covariates:
+            raise RuntimeError(
+                "The requested covariate panel "
+                f"{covariate_panel!r} could not "
+                "be constructed. Missing series: "
+                f"{missing_covariates}"
+            )
+
+        available_covariates = list(
+            requested_covariates
+        )
+
+
 
         # ---------------------------------------------------------------
         # Build the predictor
@@ -527,6 +589,16 @@ class BAA10YTuner:
             raise RuntimeError(
                 "No backtest result returned "
                 f"for {task_id}"
+            )
+        
+        if not result.predictions:
+            raise RuntimeError(
+                "The backtest returned no scored "
+                f"predictions for {candidate_id}, "
+                f"horizon={horizon}, "
+                f"experiment={experiment}. "
+                "Check the experiment dates and "
+                "past-covariate coverage."
             )
 
         # ---------------------------------------------------------------
@@ -567,6 +639,8 @@ class BAA10YTuner:
 
 __all__ = [
     "BAA10YTuner",
+    "VALID_COVARIATE_PANELS",
     "crps_improvement_pct",
     "dynamic_candidate_id",
+    "resolve_covariate_series_ids",
 ]

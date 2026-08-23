@@ -11,7 +11,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 TuningMethod = Literal[
     "linear_regression",
@@ -35,9 +35,8 @@ CovariatePanel = Literal[
 ]
 
 SearchStrategy = Literal[
-    "grid",
     "optuna_tpe",
-    "successive_halving",
+    "optuna_grid_llmp",
 ]
 
 StudyStatus = Literal[
@@ -114,7 +113,7 @@ class TrialRecord(BaseModel):
 
 
 class SearchStudyRecord(BaseModel):
-    """Summary of one adaptive parameter-search study."""
+    """Persistent summary and agent decisions for one adaptive search."""
 
     model_config = ConfigDict(
         extra="forbid"
@@ -126,8 +125,11 @@ class SearchStudyRecord(BaseModel):
     covariate_panel: CovariatePanel
     search_strategy: SearchStrategy
 
+    # Parameter search uses the paired development and
+    # inner-validation experiment. The independent validation
+    # period is accessed only after the winning parameters freeze.
     objective_experiment: TuningExperiment = (
-        "tune_2025"
+        "tune_paired_2025"
     )
     validation_experiment: TuningExperiment = (
         "validate_2025"
@@ -144,15 +146,36 @@ class SearchStudyRecord(BaseModel):
 
     status: StudyStatus = "created"
 
+    # Notebook 01-equivalent benchmark for this exact model,
+    # horizon and covariate-panel track.
     baseline_candidate_id: str = ""
     baseline_mean_crps: float | None = None
 
+    # Best configuration found using paired tuning evidence.
     best_candidate_id: str | None = None
     best_mean_crps: float | None = None
-
     best_parameters: dict[str, Any] = Field(
         default_factory=dict
     )
+
+    # Records the LLM agent's review decisions. Each entry can
+    # contain the diagnostics reviewed, selected focus action,
+    # reasoning and timestamp.
+    agent_actions: list[
+        dict[str, Any]
+    ] = Field(
+        default_factory=list
+    )
+
+    # True after the agent finishes reviewing tuning evidence.
+    # Once frozen, Optuna must not modify the finalist before
+    # independent validation.
+    search_frozen: bool = False
+
+    # Expected values include:
+    # "", "pending_validation", "promote_tuned",
+    # "retain_baseline", and "reject_overfitting".
+    validation_decision: str = ""
 
     created_at: str = Field(
         default_factory=_utc_now
@@ -160,7 +183,6 @@ class SearchStudyRecord(BaseModel):
     updated_at: str = Field(
         default_factory=_utc_now
     )
-
 
 class PromotedConfiguration(BaseModel):
     """The active configuration for one model track."""
@@ -398,18 +420,6 @@ class TuningStateStore:
                 raw
             )
         )
-
-        # Existing version-1 files remain valid because all new
-        # fields have defaults. Upgrade the version after loading.
-        if (
-            state.schema_version
-            < SCHEMA_VERSION
-        ):
-            state.schema_version = (
-                SCHEMA_VERSION
-            )
-            self.save(state)
-
         return state
 
     def save(
@@ -487,15 +497,8 @@ class TuningStateStore:
         self,
         study: SearchStudyRecord,
     ) -> None:
-        """Create or replace one search-study summary."""
-        agent_actions: list[
-            dict[str, Any]
-        ] = Field(
-            default_factory=list
-        )
-        search_frozen: bool = False
-        validation_decision: str = ""
-        
+        """Create or replace one adaptive-search study summary."""
+
         state = self.load()
 
         study.updated_at = _utc_now()
@@ -514,7 +517,6 @@ class TuningStateStore:
         )
 
         self.save(state)
-
     def promote(
         self,
         configuration: PromotedConfiguration,

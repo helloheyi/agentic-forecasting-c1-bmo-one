@@ -45,7 +45,7 @@ tasks:
       This task evaluates forward one-month spread-change forecasts.
 
 start: "2025-05-07"
-end: "2025-08-27"
+end: "2025-08-06"
 
 # One forecast origin approximately every week.
 stride: 5
