@@ -8,7 +8,9 @@ from typing import Callable
 
 from BAA10Y_forecasting.adaptive_agent.optimizer import (
     BAA10YAdaptiveOptimizer,
+    LLMP_SEARCH_SPACE,
 )
+
 from BAA10Y_forecasting.adaptive_agent.skill_state import (
     PromotedConfiguration,
     RejectedCandidate,
@@ -174,103 +176,186 @@ def build_baa10y_tuning_tools(
     def get_search_space(
         method: str = "lightgbm",
     ) -> str:
-        """Return the approved adaptive parameter search space."""
+        """Return the approved search space for one forecasting method."""
 
-        if method != "lightgbm":
-            return _error(
-                "The first adaptive search implementation "
-                "supports LightGBM only."
-            )
+        if method == "lightgbm":
+            return _json({
+                "status": "success",
+                "method": "lightgbm",
+                "strategy": "optuna_tpe",
+                "objective": (
+                    "Minimize inner-validation "
+                    "mean CRPS"
+                ),
+                "parameter_space": {
+                    "lags": [
+                        3,
+                        5,
+                        10,
+                        21,
+                    ],
+                    "lags_past_covariates": [
+                        3,
+                        5,
+                        10,
+                        21,
+                    ],
+                    "n_estimators": {
+                        "minimum": 50,
+                        "maximum": 400,
+                        "step": 50,
+                    },
+                    "learning_rate": {
+                        "minimum": 0.02,
+                        "maximum": 0.15,
+                        "scale": "log",
+                    },
+                    "tree_shapes": [
+                        {
+                            "max_depth": 3,
+                            "num_leaves": 7,
+                        },
+                        {
+                            "max_depth": 4,
+                            "num_leaves": 15,
+                        },
+                        {
+                            "max_depth": 6,
+                            "num_leaves": 31,
+                        },
+                        {
+                            "max_depth": -1,
+                            "num_leaves": 15,
+                        },
+                        {
+                            "max_depth": -1,
+                            "num_leaves": 31,
+                        },
+                    ],
+                    "min_child_samples": [
+                        10,
+                        20,
+                        40,
+                    ],
+                    "reg_alpha_l1": {
+                        "minimum": 0.0,
+                        "maximum": 2.0,
+                    },
+                    "reg_lambda_l2": {
+                        "minimum": 0.0,
+                        "maximum": 5.0,
+                    },
+                    "subsample": [
+                        0.7,
+                        0.85,
+                        1.0,
+                    ],
+                    "colsample_bytree": [
+                        0.7,
+                        0.85,
+                        1.0,
+                    ],
+                },
+                "fixed_execution_settings": {
+                    "num_threads": 1,
+                    "n_jobs": 1,
+                    "verbosity": -1,
+                    "random_state": 42,
+                },
+                "focus_actions": [
+                    "broad_search",
+                    "regularize_more",
+                    "reduce_complexity",
+                    "stabilize_boosting",
+                    "continue_tpe",
+                ],
+                "evaluation": {
+                    "development_experiment": (
+                        "tune_development_2025"
+                    ),
+                    "inner_validation_experiment": (
+                        "tune_inner_validation_2025"
+                    ),
+                    "outer_validation_experiment": (
+                        "validate_2025"
+                    ),
+                },
+                "governance": {
+                    "maximum_trials": 50,
+                    "tuning_can_promote": False,
+                    "outer_validation_required": True,
+                    "protected_eval_can_tune": False,
+                },
+            })
 
-        return _json({
-            "status": "success",
-            "method": "lightgbm",
-            "strategy": "optuna_tpe",
-            "objective": (
-                "minimize mean CRPS"
-            ),
-            "parameter_space": {
-                "lags": [
-                    3,
-                    5,
-                    10,
-                    21,
-                ],
-                "lags_past_covariates": [
-                    3,
-                    5,
-                    10,
-                    21,
-                ],
-                "n_estimators": {
-                    "minimum": 50,
-                    "maximum": 400,
-                    "step": 50,
+        if (
+            method
+            == "llmp_sampled_trajectory"
+        ):
+            return _json({
+                "status": "success",
+                "method": (
+                    "llmp_sampled_trajectory"
+                ),
+                "strategy": (
+                    "optuna_grid_llmp"
+                ),
+                "objective": (
+                    "Minimize inner-validation "
+                    "mean CRPS"
+                ),
+                "parameter_space": {
+                    "n_samples": (
+                        LLMP_SEARCH_SPACE[
+                            "n_samples"
+                        ]
+                    ),
+                    "history_window": (
+                        LLMP_SEARCH_SPACE[
+                            "history_window"
+                        ]
+                    ),
                 },
-                "learning_rate": {
-                    "minimum": 0.02,
-                    "maximum": 0.15,
-                    "scale": "log",
+                "fixed_execution_settings": {
+                    "model": (
+                        "notebook_01_benchmark_model"
+                    ),
+                    "reasoning_effort": None,
+                    "max_tokens": 16384,
                 },
-                "tree_shapes": [
-                    {
-                        "max_depth": 3,
-                        "num_leaves": 7,
-                    },
-                    {
-                        "max_depth": 4,
-                        "num_leaves": 15,
-                    },
-                    {
-                        "max_depth": 6,
-                        "num_leaves": 31,
-                    },
-                    {
-                        "max_depth": -1,
-                        "num_leaves": 15,
-                    },
-                    {
-                        "max_depth": -1,
-                        "num_leaves": 31,
-                    },
+                "focus_actions": [
+                    "broad_search",
+                    "increase_samples",
+                    "shorter_history",
+                    "longer_history",
+                    "continue_grid",
                 ],
-                "min_child_samples": [
-                    10,
-                    20,
-                    40,
-                ],
-                "reg_alpha_l1": {
-                    "minimum": 0.0,
-                    "maximum": 2.0,
+                "evaluation": {
+                    "development_experiment": (
+                        "tune_development_2025"
+                    ),
+                    "inner_validation_experiment": (
+                        "tune_inner_validation_2025"
+                    ),
+                    "finalist_repeats": 3,
+                    "outer_validation_experiment": (
+                        "validate_2025"
+                    ),
                 },
-                "reg_lambda_l2": {
-                    "minimum": 0.0,
-                    "maximum": 5.0,
+                "governance": {
+                    "maximum_trials": 12,
+                    "tuning_can_promote": False,
+                    "outer_validation_required": True,
+                    "protected_eval_can_tune": False,
+                    "stress_2020_allowed": False,
                 },
-                "subsample": [
-                    0.7,
-                    0.85,
-                    1.0,
-                ],
-                "colsample_bytree": [
-                    0.7,
-                    0.85,
-                    1.0,
-                ],
-            },
-            "fixed_execution_settings": {
-                "num_threads": 1,
-                "n_jobs": 1,
-                "verbosity": -1,
-                "random_state": 42,
-            },
-            "governance": {
-                "smoke_is_screening_only": True,
-                "smoke_can_promote": False,
-                "protected_eval_can_tune": False,
-                "maximum_trials": 50,
-            },
-        })
+            })
+
+        return _error(
+            "Unsupported adaptive-search method: "
+            f"{method}. Expected 'lightgbm' or "
+            "'llmp_sampled_trajectory'."
+        )
 
     # ------------------------------------------------------------------
     # Tool 4: Run one legacy fixed-candidate trial
@@ -320,7 +405,9 @@ def build_baa10y_tuning_tools(
         method: str = "lightgbm",
         horizon: int = 5,
         covariate_panel: str = "default",
-        max_trials: int = 12,
+        max_trials: int = 6,
+        focus_action: str = "broad_search",
+        reason: str = "",
         force_refresh: bool = False,
     ) -> str:
         """Run or resume an Optuna adaptive parameter search."""
@@ -333,6 +420,8 @@ def build_baa10y_tuning_tools(
                     covariate_panel
                 ),
                 max_trials=max_trials,
+                focus_action=focus_action,
+                reason=reason,
                 force_refresh=force_refresh,
             )
 
@@ -810,13 +899,36 @@ def build_baa10y_tuning_tools(
                 "Candidate rejection failed: "
                 f"{exc}"
             )
+    def get_search_diagnostics(
+        study_name: str,
+    ) -> str:
+        """Return development-versus-validation diagnostics."""
 
+        try:
+            result = (
+                optimizer.get_search_diagnostics(
+                    study_name=study_name
+                )
+            )
+
+            return _json({
+                "status": "success",
+                **result,
+            })
+
+        except Exception as exc:
+            return _error(
+                "Unable to create search "
+                f"diagnostics: {exc}"
+            )
+        
     return [
         get_tuning_state,
         list_tuning_candidates,
         get_search_space,
         run_tuning_trial,
         run_adaptive_search,
+        get_search_diagnostics,
         compare_tuning_trials,
         promote_tuning_candidate,
         reject_tuning_candidate,
@@ -824,5 +936,8 @@ def build_baa10y_tuning_tools(
 
 
 __all__ = [
-    "build_baa10y_tuning_tools",
+    "BAA10YAdaptiveOptimizer",
+    "LLMP_SEARCH_SPACE",
+    "suggest_lightgbm_parameters",
+    "suggest_llmp_parameters",
 ]

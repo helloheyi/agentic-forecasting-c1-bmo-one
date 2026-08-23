@@ -44,10 +44,21 @@ PREDICTIONS_DIR = (
 
 SPEC_FILES = {
     "smoke": "baa10y_smoke.yaml",
-    "tune_2025": "baa10y_tune_2025.yaml",
-    "validate_2025": "baa10y_validate_2025.yaml",
-    "backtest_2025": "baa10y_backtest_2025.yaml",
-    "stress_2020": "baa10y_stress_2020.yaml",
+    "tune_development_2025": (
+        "baa10y_tune_development_2025.yaml"
+    ),
+    "tune_inner_validation_2025": (
+        "baa10y_tune_inner_validation_2025.yaml"
+    ),
+    "validate_2025": (
+        "baa10y_validate_2025.yaml"
+    ),
+    "backtest_2025": (
+        "baa10y_backtest_2025.yaml"
+    ),
+    "stress_2020": (
+        "baa10y_stress_2020.yaml"
+    ),
 }
 
 VALID_HORIZONS = {
@@ -214,7 +225,117 @@ class BAA10YTuner:
             experiment=experiment,
             force_refresh=force_refresh,
         )
+    
+    def run_paired_parameter_trial(
+        self,
+        *,
+        method: str,
+        horizon: int,
+        covariate_panel: str,
+        parameters: dict[str, Any],
+        force_refresh: bool = False,
+        is_baseline: bool = False,
+    ) -> dict[str, Any]:
+        """Evaluate one configuration on two tuning periods."""
 
+        development_result = (
+            self.run_parameter_trial(
+                method=method,
+                horizon=horizon,
+                covariate_panel=(
+                    covariate_panel
+                ),
+                parameters=parameters,
+                experiment=(
+                    "tune_development_2025"
+                ),
+                force_refresh=force_refresh,
+                is_baseline=is_baseline,
+            )
+        )
+
+        inner_validation_result = (
+            self.run_parameter_trial(
+                method=method,
+                horizon=horizon,
+                covariate_panel=(
+                    covariate_panel
+                ),
+                parameters=parameters,
+                experiment=(
+                    "tune_inner_validation_2025"
+                ),
+                force_refresh=force_refresh,
+                is_baseline=is_baseline,
+            )
+        )
+
+        development_crps = float(
+            development_result[
+                "mean_crps"
+            ]
+        )
+
+        inner_validation_crps = float(
+            inner_validation_result[
+                "mean_crps"
+            ]
+        )
+
+        generalization_gap_pct = None
+
+        if development_crps > 0:
+            generalization_gap_pct = (
+                100.0
+                * (
+                    inner_validation_crps
+                    - development_crps
+                )
+                / development_crps
+            )
+
+        combined_result = copy.deepcopy(
+            inner_validation_result
+        )
+
+        combined_result.update({
+            # New combined experiment.
+            "experiment": (
+                "tune_paired_2025"
+            ),
+
+            # Optuna minimizes inner validation.
+            "mean_crps": (
+                inner_validation_crps
+            ),
+
+            "development_mean_crps": (
+                development_crps
+            ),
+
+            "inner_validation_mean_crps": (
+                inner_validation_crps
+            ),
+
+            "generalization_gap_pct": (
+                generalization_gap_pct
+            ),
+
+            "development_n_predictions": (
+                development_result[
+                    "n_predictions"
+                ]
+            ),
+
+            "inner_validation_n_predictions": (
+                inner_validation_result[
+                    "n_predictions"
+                ]
+            ),
+        })
+
+        return combined_result
+    
     def _run_candidate(
         self,
         *,

@@ -1,6 +1,6 @@
 schema_version: 2
 created_at: '2026-08-22T05:38:23.964968+00:00'
-updated_at: '2026-08-22T11:02:51.039563+00:00'
+updated_at: '2026-08-22T23:58:03.524891+00:00'
 trials:
 - trial_id: trial-6881d605b1bc
   candidate_id: lightgbm_default_ef942949340b
@@ -26,6 +26,11 @@ trials:
   mean_crps: 5.068858216283617
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 22
   skipped_origins: 3
@@ -64,6 +69,11 @@ trials:
   mean_crps: 4.219165503030118
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -102,6 +112,11 @@ trials:
   mean_crps: 4.267153195210196
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -140,6 +155,11 @@ trials:
   mean_crps: 4.406392218492249
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -178,6 +198,11 @@ trials:
   mean_crps: 4.50526514339615
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -216,6 +241,11 @@ trials:
   mean_crps: 4.61064247693803
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -254,6 +284,11 @@ trials:
   mean_crps: 4.2922730534274915
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -292,6 +327,11 @@ trials:
   mean_crps: 4.281350331785182
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -330,6 +370,11 @@ trials:
   mean_crps: 4.366609162551453
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -368,6 +413,11 @@ trials:
   mean_crps: 4.316792355633711
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -406,6 +456,11 @@ trials:
   mean_crps: 4.589433758241433
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -444,6 +499,11 @@ trials:
   mean_crps: 4.22097331056079
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -482,6 +542,11 @@ trials:
   mean_crps: 4.211432755090886
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 25
   skipped_origins: 0
@@ -510,6 +575,11 @@ trials:
   mean_crps: 2.3259439650240834
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 20
   skipped_origins: 0
@@ -548,10 +618,47 @@ trials:
   mean_crps: 2.388682618614868
   crps_std: null
   median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
   score_by_origin: {}
   n_predictions: 20
   skipped_origins: 0
   ran_at: '2026-08-22T11:02:50.939602'
+- trial_id: trial-5eba7e275818
+  candidate_id: lightgbm_l5_cov
+  predictor_id: baa10y_lightgbm_009c4bfca0
+  method: lightgbm
+  horizon: 5
+  experiment: smoke
+  parameters:
+    lags: 5
+    lags_past_covariates: 5
+    num_samples: 100
+    lgbm_kwargs:
+      num_threads: 1
+      n_jobs: 1
+      random_state: 42
+  covariate_panel: default
+  is_baseline: false
+  study_name: ''
+  trial_number: null
+  parameter_hash: ''
+  search_strategy: ''
+  mean_crps: 4.260041169605704
+  crps_std: null
+  median_crps: null
+  development_mean_crps: null
+  inner_validation_mean_crps: null
+  generalization_gap_pct: null
+  development_n_predictions: null
+  inner_validation_n_predictions: null
+  score_by_origin: {}
+  n_predictions: 6
+  skipped_origins: 0
+  ran_at: '2026-08-20T19:45:21.650863'
 studies:
 - study_name: baa10y_lightgbm_default_h5_tune_2025
   method: lightgbm

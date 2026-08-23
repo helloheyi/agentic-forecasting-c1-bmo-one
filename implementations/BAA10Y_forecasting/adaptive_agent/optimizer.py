@@ -15,6 +15,8 @@ from BAA10Y_forecasting.adaptive_agent.skill_state import (
 )
 from BAA10Y_forecasting.adaptive_agent.tuner import (
     BAA10YTuner,
+    crps_improvement_pct,
+
 )
 from BAA10Y_forecasting.predictors.benchmark_configs import (
     get_benchmark_config,
@@ -43,7 +45,69 @@ TREE_SHAPES = {
         "num_leaves": 31,
     },
 }
+MAX_TOTAL_TRIALS = 18
 
+
+FOCUS_TEMPLATES = {
+    "broad_search": [],
+
+    "continue_tpe": [],
+
+    "reduce_complexity": [
+        {
+            "tree_shape": (
+                "depth3_leaves7"
+            ),
+        },
+        {
+            "tree_shape": (
+                "depth4_leaves15"
+            ),
+        },
+    ],
+
+    "increase_regularization": [
+        {
+            "reg_alpha": 0.5,
+            "reg_lambda": 2.0,
+        },
+        {
+            "reg_alpha": 1.0,
+            "reg_lambda": 4.0,
+        },
+    ],
+
+    "lower_learning_rate": [
+        {
+            "learning_rate": 0.03,
+        },
+        {
+            "learning_rate": 0.05,
+        },
+    ],
+
+    "focus_short_lags": [
+        {
+            "lags": 3,
+            "lags_past_covariates": 3,
+        },
+        {
+            "lags": 5,
+            "lags_past_covariates": 5,
+        },
+    ],
+
+    "focus_medium_lags": [
+        {
+            "lags": 5,
+            "lags_past_covariates": 5,
+        },
+        {
+            "lags": 10,
+            "lags_past_covariates": 10,
+        },
+    ],
+}
 
 def suggest_lightgbm_parameters(
     trial: optuna.Trial,
@@ -157,6 +221,71 @@ def suggest_lightgbm_parameters(
 
     return parameters
 
+LLMP_SEARCH_SPACE = {
+    "n_samples": [
+        8,
+        12,
+        16,
+    ],
+    "history_window": [
+        32,
+        48,
+        64,
+        96,
+    ],
+}
+
+LLMP_FOCUS_ACTIONS = {
+    "broad_search",
+    "increase_samples",
+    "shorter_history",
+    "longer_history",
+    "continue_grid",
+}
+
+
+def suggest_llmp_parameters(
+    trial: optuna.Trial,
+    *,
+    covariate_panel: str,
+) -> dict[str, Any]:
+    """Ask Optuna to suggest one sampled-trajectory LLMP configuration."""
+
+    parameters = get_benchmark_config(
+        "llmp_sampled_trajectory",
+        covariate_panel,
+    )
+
+    parameters["n_samples"] = (
+        trial.suggest_categorical(
+            "n_samples",
+            LLMP_SEARCH_SPACE[
+                "n_samples"
+            ],
+        )
+    )
+
+    parameters["history_window"] = (
+        trial.suggest_categorical(
+            "history_window",
+            LLMP_SEARCH_SPACE[
+                "history_window"
+            ],
+        )
+    )
+
+    # These are fixed execution settings, not tuned parameters.
+    parameters.setdefault(
+        "reasoning_effort",
+        None,
+    )
+
+    parameters.setdefault(
+        "max_tokens",
+        16384,
+    )
+
+    return parameters
 
 class BAA10YAdaptiveOptimizer:
     """Run persistent Optuna searches for BAA10Y models."""
@@ -225,19 +354,38 @@ class BAA10YAdaptiveOptimizer:
         method: str,
         horizon: int,
         covariate_panel: str,
-        max_trials: int = 12,
+        max_trials: int = 6,
+        focus_action: str = "broad_search",
+        reason: str = "",
         force_refresh: bool = False,
     ) -> dict[str, Any]:
+        
         """Run or resume one adaptive Optuna smoke search.
 
         This first implementation supports LightGBM only. Smoke results
         screen candidates but never authorize promotion.
         """
 
-        if method != "lightgbm":
+        SUPPORTED_SEARCH_METHODS = {
+            "lightgbm",
+            "llmp_sampled_trajectory",
+        }
+
+        if method not in SUPPORTED_SEARCH_METHODS:
             raise ValueError(
-                "The first Optuna implementation "
-                "supports method='lightgbm' only."
+                f"Unsupported adaptive-search method: {method}. "
+                f"Expected one of "
+                f"{sorted(SUPPORTED_SEARCH_METHODS)}."
+            )
+
+        if (
+            method == "llmp_sampled_trajectory"
+            and max_trials > 12
+        ):
+            raise ValueError(
+                "LLMP max_trials cannot exceed 12 "
+                "because its approved grid contains "
+                "12 configurations."
             )
 
         if horizon not in {
@@ -258,13 +406,20 @@ class BAA10YAdaptiveOptimizer:
                 "'target_only' or 'default'"
             )
 
-        if not 1 <= max_trials <= 50:
+        if focus_action not in FOCUS_TEMPLATES:
             raise ValueError(
-                "max_trials must be between "
-                "1 and 50"
+                "Unsupported focus_action: "
+                f"{focus_action}. Expected one of "
+                f"{sorted(FOCUS_TEMPLATES)}."
             )
 
-        experiment = "tune_2025"
+        if not 1 <= max_trials <= MAX_TOTAL_TRIALS:
+            raise ValueError(
+                "max_trials must be between "
+                f"1 and {MAX_TOTAL_TRIALS}."
+            )
+        
+        experiment = "tune_paired_2025"
 
         study_name = self._study_name(
             method=method,
@@ -300,21 +455,20 @@ class BAA10YAdaptiveOptimizer:
             )
         )
 
-        baseline_result.update({
-            "study_name": study_name,
-            "trial_number": -1,
-            "parameter_hash": (
-                baseline_result[
-                    "candidate_id"
-                ].rsplit(
-                    "_",
-                    1,
-                )[-1]
-            ),
-            "search_strategy": (
-                "optuna_tpe"
-            ),
-        })
+        baseline_result = (
+            self.tuner.run_paired_parameter_trial(
+                method=method,
+                horizon=horizon,
+                covariate_panel=(
+                    covariate_panel
+                ),
+                parameters=(
+                    baseline_parameters
+                ),
+                force_refresh=force_refresh,
+                is_baseline=True,
+            )
+        )
 
         baseline_trial, _ = (
             self.store.add_trial(
@@ -326,12 +480,40 @@ class BAA10YAdaptiveOptimizer:
         # Create or resume the Optuna study
         # ---------------------------------------------------------------
 
-        sampler = (
-            optuna.samplers.TPESampler(
-                seed=42,
-                n_startup_trials=5,
+        if method == "lightgbm":
+            sampler = (
+                optuna.samplers.TPESampler(
+                    seed=42,
+                    n_startup_trials=5,
+                )
             )
-        )
+
+            search_strategy = (
+                    search_strategy            
+                    )
+
+        elif (
+            method
+            == "llmp_sampled_trajectory"
+        ):
+            sampler = (
+                optuna.samplers.GridSampler(
+                    search_space=(
+                        LLMP_SEARCH_SPACE
+                    ),
+                    seed=42,
+                )
+            )
+
+            search_strategy = (
+                "optuna_grid_llmp"
+            )
+
+        else:
+            raise ValueError(
+                "No Optuna sampler is registered "
+                f"for method={method!r}."
+            )
 
         study = optuna.create_study(
             study_name=study_name,
@@ -356,7 +538,7 @@ class BAA10YAdaptiveOptimizer:
                     covariate_panel
                 ),
                 search_strategy=(
-                    "optuna_tpe"
+                    "search_strategy"
                 ),
                 objective_experiment=(
                     experiment
@@ -400,7 +582,7 @@ class BAA10YAdaptiveOptimizer:
             )
 
             result = (
-                self.tuner.run_parameter_trial(
+                self.tuner.run_paired_parameter_trial(
                     method=method,
                     horizon=horizon,
                     covariate_panel=(
@@ -429,7 +611,7 @@ class BAA10YAdaptiveOptimizer:
                     )[-1]
                 ),
                 "search_strategy": (
-                    "optuna_tpe"
+                    "search_strategy"
                 ),
             })
 
@@ -471,6 +653,41 @@ class BAA10YAdaptiveOptimizer:
             - completed_before,
         )
 
+        if (
+        remaining_trials > 0
+        and focus_action
+        not in {
+            "broad_search",
+            "continue_tpe",
+        }
+        ):
+            templates = copy.deepcopy(
+            FOCUS_TEMPLATES[
+                focus_action
+            ]
+        )
+
+        for template in templates:
+            if (
+                covariate_panel
+                == "target_only"
+            ):
+                template.pop(
+                    "lags_past_covariates",
+                    None,
+                )
+
+            study.enqueue_trial(
+                template,
+                skip_if_exists=True,
+            )
+
+
+        
+
+
+
+
         if remaining_trials > 0:
             study.optimize(
                 objective,
@@ -489,6 +706,24 @@ class BAA10YAdaptiveOptimizer:
                 == TrialState.COMPLETE
             )
         ]
+
+
+        if (
+            remaining_trials > 0
+            and focus_action
+            != "broad_search"
+        ):
+            study_record.agent_actions.append({
+                "focus_action": focus_action,
+                "reason": reason,
+                "completed_before": (
+                    completed_before
+                ),
+                "requested_total_trials": (
+                    max_trials
+                ),
+            })
+
 
         if not completed_trials:
             study_record.status = "failed"
@@ -607,6 +842,17 @@ class BAA10YAdaptiveOptimizer:
 
         history_rows = [
             {
+                "development_crps": (
+                    trial.development_mean_crps
+                ),
+
+                "inner_validation_crps": (
+                    trial.inner_validation_mean_crps
+                ),
+
+                "generalization_gap_pct": (
+                    trial.generalization_gap_pct
+                ),
                 "trial_number": (
                     trial.trial_number
                 ),
@@ -642,7 +888,7 @@ class BAA10YAdaptiveOptimizer:
                 covariate_panel
             ),
             "search_strategy": (
-                "optuna_tpe"
+                "search_strategy"
             ),
             "experiment": experiment,
             "candidate_trials_completed": (
@@ -685,9 +931,195 @@ class BAA10YAdaptiveOptimizer:
             ),
             "trial_history": history_rows,
         }
+    def get_search_diagnostics(
+        self,
+        *,
+        study_name: str,
+    ) -> dict[str, Any]:
+        """Compare development and inner-validation evidence."""
+
+        state = self.store.load()
+
+        study_record = state.get_study(
+            study_name
+        )
+
+        if study_record is None:
+            raise ValueError(
+                f"Unknown study: {study_name}"
+            )
+
+        trials = state.find_trials(
+            method=study_record.method,
+            horizon=study_record.horizon,
+            experiment=(
+                "tune_paired_2025"
+            ),
+            covariate_panel=(
+                study_record.covariate_panel
+            ),
+            study_name=study_name,
+        )
+
+        paired_trials = [
+            trial
+            for trial in trials
+            if (
+                trial.development_mean_crps
+                is not None
+                and trial
+                .inner_validation_mean_crps
+                is not None
+            )
+        ]
+
+        baseline_trials = [
+            trial
+            for trial in paired_trials
+            if trial.is_baseline
+        ]
+
+        if not baseline_trials:
+            raise RuntimeError(
+                "No paired benchmark trial found."
+            )
+
+        baseline = baseline_trials[-1]
+
+        diagnostics = []
+
+        for trial in paired_trials:
+            if trial.is_baseline:
+                continue
+
+            development_improvement = (
+                crps_improvement_pct(
+                    baseline_crps=(
+                        baseline
+                        .development_mean_crps
+                    ),
+                    candidate_crps=(
+                        trial
+                        .development_mean_crps
+                    ),
+                )
+            )
+
+            validation_improvement = (
+                crps_improvement_pct(
+                    baseline_crps=(
+                        baseline
+                        .inner_validation_mean_crps
+                    ),
+                    candidate_crps=(
+                        trial
+                        .inner_validation_mean_crps
+                    ),
+                )
+            )
+
+            gap_deterioration = False
+
+            if (
+                trial.generalization_gap_pct
+                is not None
+                and baseline
+                .generalization_gap_pct
+                is not None
+            ):
+                gap_deterioration = (
+                    trial
+                    .generalization_gap_pct
+                    > baseline
+                    .generalization_gap_pct
+                    + 10.0
+                )
+
+            possible_overfitting = (
+                (
+                    development_improvement
+                    is not None
+                    and development_improvement
+                    > 0
+                    and validation_improvement
+                    is not None
+                    and validation_improvement
+                    <= 0
+                )
+                or gap_deterioration
+            )
+
+            diagnostics.append({
+                "trial_number": (
+                    trial.trial_number
+                ),
+                "candidate_id": (
+                    trial.candidate_id
+                ),
+                "development_crps": (
+                    trial
+                    .development_mean_crps
+                ),
+                "inner_validation_crps": (
+                    trial
+                    .inner_validation_mean_crps
+                ),
+                "development_improvement_pct": (
+                    development_improvement
+                ),
+                "inner_validation_improvement_pct": (
+                    validation_improvement
+                ),
+                "generalization_gap_pct": (
+                    trial
+                    .generalization_gap_pct
+                ),
+                "possible_overfitting": (
+                    possible_overfitting
+                ),
+                "parameters": (
+                    trial.parameters
+                ),
+            })
+
+        diagnostics.sort(
+            key=lambda row: (
+                row[
+                    "inner_validation_crps"
+                ]
+            )
+        )
+
+        return {
+            "study_name": study_name,
+            "benchmark": {
+                "development_crps": (
+                    baseline
+                    .development_mean_crps
+                ),
+                "inner_validation_crps": (
+                    baseline
+                    .inner_validation_mean_crps
+                ),
+                "generalization_gap_pct": (
+                    baseline
+                    .generalization_gap_pct
+                ),
+            },
+            "trial_diagnostics": (
+                diagnostics
+            ),
+            "agent_actions": (
+                study_record.agent_actions
+            ),
+            "allowed_focus_actions": (
+                list(FOCUS_TEMPLATES)
+            ),
+        }
 
 
 __all__ = [
     "BAA10YAdaptiveOptimizer",
     "suggest_lightgbm_parameters",
+    "LLMP_SEARCH_SPACE"
 ]

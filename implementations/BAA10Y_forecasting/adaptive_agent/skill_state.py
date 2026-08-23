@@ -22,6 +22,7 @@ TuningMethod = Literal[
 TuningExperiment = Literal[
     "smoke",
     "tune_2025",
+    "tune_paired_2025",
     "validate_2025",
     "backtest_2025",
     "stress_2020",
@@ -94,6 +95,12 @@ class TrialRecord(BaseModel):
     crps_std: float | None = None
     median_crps: float | None = None
 
+    # Paired tuning evidence.
+    development_mean_crps: float | None = None
+    inner_validation_mean_crps: float | None = None
+    generalization_gap_pct: float | None = None
+    development_n_predictions: int | None = None
+    inner_validation_n_predictions: int | None = None
     # Origin date -> CRPS. This will later allow a direct
     # baseline-versus-candidate origin win-rate calculation.
     score_by_origin: dict[str, float] = Field(
@@ -481,7 +488,14 @@ class TuningStateStore:
         study: SearchStudyRecord,
     ) -> None:
         """Create or replace one search-study summary."""
-
+        agent_actions: list[
+            dict[str, Any]
+        ] = Field(
+            default_factory=list
+        )
+        search_frozen: bool = False
+        validation_decision: str = ""
+        
         state = self.load()
 
         study.updated_at = _utc_now()

@@ -1,0 +1,37 @@
+# Independent validation period for adaptive tuning finalists.
+#
+# Optuna must not use this period when suggesting parameters.
+# Only the notebook 01 benchmark and frozen finalists may be run here.
+
+spec_id: baa10y_validate_2025
+
+description: >-
+  Independent adaptive-model validation period covering weekly forecast
+  origins during the second half of 2025.
+
+tasks:
+  - task_id: baa10y_change_1b
+    target_series_id: baa10y_change_1b
+    horizons: [1]
+    frequency: B
+    description: >-
+      BAA10Y cumulative spread change one business day ahead.
+
+  - task_id: baa10y_change_5b
+    target_series_id: baa10y_change_5b
+    horizons: [5]
+    frequency: B
+    description: >-
+      BAA10Y cumulative spread change five business days ahead.
+
+  - task_id: baa10y_change_21b
+    target_series_id: baa10y_change_21b
+    horizons: [21]
+    frequency: B
+    description: >-
+      BAA10Y cumulative spread change twenty-one business days ahead.
+
+start: "2025-08-06"
+end: "2025-12-17"
+stride: 5
+warmup: 250
