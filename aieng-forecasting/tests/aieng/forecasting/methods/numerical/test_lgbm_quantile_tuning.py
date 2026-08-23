@@ -5,7 +5,9 @@ Pure-function tests cover the interpolation math and the
 import required). The shared-vs-separate orchestration is tested with
 ``tune_lightgbm_quantile_config`` mocked out. One smoke test runs a real,
 tiny (``n_trials=1``) end-to-end Optuna study against synthetic data — the
-only place the expensive path actually executes.
+only place the expensive path actually executes. A further section covers
+the save/resume (scratch/reuse/resume) modes against real, tiny SQLite-backed
+studies using pytest's ``tmp_path`` fixture.
 """
 
 from __future__ import annotations
@@ -278,3 +280,145 @@ def test_tune_lightgbm_quantile_config_smoke(task: ForecastingTask, svc: DataSer
 
     assert set(result.per_quantile_kwargs) == set(_TRAINING_QUANTILES)
     assert np.isfinite(result.best_score)
+
+
+# --- Save/resume across sessions (persistent SQLite storage) ------------------
+
+
+def test_tune_lightgbm_quantile_config_scratch_persists_study(tmp_path, task: ForecastingTask, svc: DataService) -> None:
+    """mode='scratch' with storage_path writes a study db and runs the full n_trials."""
+    pytest.importorskip("optuna")
+    db_path = tmp_path / "studies.db"
+
+    result = tune_lightgbm_quantile_config(
+        task=task, data_service=svc, validation_end=datetime(2015, 1, 1),
+        validation_window=12, num_samples=20, seed=0,
+        n_trials=2, storage_path=db_path, mode="scratch",
+    )
+
+    assert result.n_trials == 2
+    assert db_path.exists()
+
+
+def test_tune_lightgbm_quantile_config_scratch_wipes_prior_trials(tmp_path, task: ForecastingTask, svc: DataService) -> None:
+    """A second scratch run replaces, rather than accumulates onto, the first."""
+    pytest.importorskip("optuna")
+    shared = {
+        "task": task, "data_service": svc, "validation_end": datetime(2015, 1, 1),
+        "validation_window": 12, "num_samples": 20, "seed": 0,
+        "storage_path": tmp_path / "studies.db", "mode": "scratch",
+    }
+
+    tune_lightgbm_quantile_config(n_trials=3, **shared)
+    result = tune_lightgbm_quantile_config(n_trials=2, **shared)
+
+    assert result.n_trials == 2
+
+
+def test_tune_lightgbm_quantile_config_resume_adds_only_remaining_trials(
+    tmp_path, task: ForecastingTask, svc: DataService
+) -> None:
+    """Resume tops a study up to n_trials total, not n_trials more."""
+    optuna = pytest.importorskip("optuna")
+    db_path = tmp_path / "studies.db"
+    shared = {
+        "task": task, "data_service": svc, "validation_end": datetime(2015, 1, 1),
+        "validation_window": 12, "num_samples": 20, "seed": 0, "storage_path": db_path,
+    }
+
+    tune_lightgbm_quantile_config(n_trials=2, mode="scratch", **shared)
+    result = tune_lightgbm_quantile_config(n_trials=5, mode="resume", **shared)
+
+    assert result.n_trials == 5
+    storage_url = f"sqlite:///{db_path.resolve().as_posix()}"
+    study = optuna.load_study(study_name=f"{task.task_id}_univariate", storage=storage_url)
+    assert len(study.trials) == 5
+
+
+def test_tune_lightgbm_quantile_config_resume_at_or_above_budget_runs_nothing(
+    tmp_path, mocker, task: ForecastingTask, svc: DataService
+) -> None:
+    """Resume with a budget already met makes zero new backtest calls."""
+    pytest.importorskip("optuna")
+    shared = {
+        "task": task, "data_service": svc, "validation_end": datetime(2015, 1, 1),
+        "validation_window": 12, "num_samples": 20, "seed": 0,
+        "storage_path": tmp_path / "studies.db",
+    }
+
+    tune_lightgbm_quantile_config(n_trials=3, mode="scratch", **shared)
+    mock_backtest = mocker.patch("aieng.forecasting.methods.numerical.lgbm_quantile_tuning.backtest")
+    result = tune_lightgbm_quantile_config(n_trials=3, mode="resume", **shared)
+
+    assert mock_backtest.call_count == 0
+    assert result.n_trials == 3
+
+
+def test_tune_lightgbm_quantile_config_reuse_makes_no_new_calls(
+    tmp_path, mocker, task: ForecastingTask, svc: DataService
+) -> None:
+    """Reuse loads the saved result and never calls backtest."""
+    pytest.importorskip("optuna")
+    shared = {
+        "task": task, "data_service": svc, "validation_end": datetime(2015, 1, 1),
+        "validation_window": 12, "num_samples": 20, "seed": 0,
+        "storage_path": tmp_path / "studies.db",
+    }
+
+    first = tune_lightgbm_quantile_config(n_trials=2, mode="scratch", **shared)
+    mock_backtest = mocker.patch("aieng.forecasting.methods.numerical.lgbm_quantile_tuning.backtest")
+    result = tune_lightgbm_quantile_config(n_trials=2, mode="reuse", **shared)
+
+    assert mock_backtest.call_count == 0
+    assert result.n_trials == 2
+    assert result.best_score == first.best_score
+
+
+def test_tune_lightgbm_quantile_config_reuse_raises_when_no_saved_study(
+    tmp_path, task: ForecastingTask, svc: DataService
+) -> None:
+    """Reuse fails fast rather than silently running a full study on a cold start."""
+    pytest.importorskip("optuna")
+    with pytest.raises(ValueError, match="reuse"):
+        tune_lightgbm_quantile_config(
+            task=task, data_service=svc, validation_end=datetime(2015, 1, 1),
+            storage_path=tmp_path / "studies.db", mode="reuse",
+        )
+
+
+def test_tune_lightgbm_quantile_config_mode_requires_storage_path(task: ForecastingTask, svc: DataService) -> None:
+    """resume/reuse without storage_path raise before optuna is even imported."""
+    for mode in ("reuse", "resume"):
+        with pytest.raises(ValueError, match="storage_path"):
+            tune_lightgbm_quantile_config(
+                task=task, data_service=svc, validation_end=datetime(2015, 1, 1), mode=mode,
+            )
+
+
+def test_tune_lightgbm_quantile_config_rejects_unknown_mode(task: ForecastingTask, svc: DataService) -> None:
+    """An unrecognized mode string raises immediately."""
+    with pytest.raises(ValueError, match="mode"):
+        tune_lightgbm_quantile_config(
+            task=task, data_service=svc, validation_end=datetime(2015, 1, 1), mode="bogus",
+        )
+
+
+def test_tune_lightgbm_configs_forwards_storage_path_and_mode(
+    tmp_path, mocker, task: ForecastingTask, svc: DataService
+) -> None:
+    """storage_path/mode reach the inner tuner; study_name keeps its own default."""
+    mock_tune = mocker.patch(
+        "aieng.forecasting.methods.numerical.lgbm_quantile_tuning.tune_lightgbm_quantile_config",
+        side_effect=[_canned_result("univariate"), _canned_result("covariate")],
+    )
+    db_path = tmp_path / "studies.db"
+
+    tune_lightgbm_configs(
+        task=task, data_service=svc, validation_end=datetime(2015, 1, 1),
+        covariate_series_ids=["cov"], separate=True, storage_path=db_path, mode="resume",
+    )
+
+    for call in mock_tune.call_args_list:
+        assert call.kwargs["storage_path"] == db_path
+        assert call.kwargs["mode"] == "resume"
+        assert "study_name" not in call.kwargs

@@ -12,11 +12,11 @@ All of this is implemented in
 [`aieng-forecasting/aieng/forecasting/methods/numerical/lgbm_quantile_tuning.py`](../aieng-forecasting/aieng/forecasting/methods/numerical/lgbm_quantile_tuning.py)
 (the search itself).
 
-> **Status.** This is a library addition: the tuning module, the predictor-side
-> `per_quantile_kwargs` hook, tests, and this guide. It is **not yet wired into**
-> the BAA10Y notebooks (`01_BAA10Y_multivariate_backtest.ipynb`,
-> `02_BAA10Y_backtest_comparison.ipynb`) — every existing `DartsLightGBMPredictor`
-> call site is unaffected until someone opts in. See §10.
+> **Status.** Wired into `01_BAA10Y_multivariate_backtest.ipynb`'s predictors
+> cell (`LIGHTGBM_MODE`/`TUNING_TASK_ID`/`LGBM_TUNING_MODE`); not yet into
+> `02_BAA10Y_backtest_comparison.ipynb`. Every pre-existing
+> `DartsLightGBMPredictor` call site elsewhere is unaffected unless it opts
+> in. See §11.
 
 ---
 
@@ -215,7 +215,61 @@ the more robust upgrade path.
 
 ---
 
-## 7. How to call it
+## 7. Saving and resuming tuning sessions
+
+A study built at BAA10Y scale takes real wall-clock time — see §6. By
+default every study is **in-memory only**: closing the notebook kernel
+discards it, and the next session pays the full cost again. Passing
+`storage_path` (a SQLite file) persists the study across sessions, and
+`mode` controls what happens with what's saved:
+
+| Mode | Cost | Use it when | Resulting `TuningResult.n_trials` |
+|---|---|---|---|
+| `"scratch"` | Full `n_trials` | First run, or after changing `param_ranges`/`lags`/`covariate_series_ids` | `n_trials` |
+| `"resume"` | Only the shortfall | Want more confidence than last session gave, without losing it | `max(n_trials, trials already saved)` |
+| `"reuse"` | ~Zero (no new trials) | Just want last session's config back | Whatever was already saved |
+
+`storage_path` is a plain SQLite file — one file can hold multiple
+independently-named studies (`tune_lightgbm_configs`'s two per-variant calls
+share one file safely, via an auto-derived `study_name` per variant). Put it
+under `<implementation>/data/...` (e.g. next to `PREDICTIONS_DIR` in the
+BAA10Y notebook) — the repo's existing broad `/data/` and
+`implementations/**/data/` `.gitignore` rules already cover it, no new
+entries needed.
+
+**`n_trials`'s meaning changes with `mode`.** For `"scratch"` it's the count
+to run, same as always. For `"resume"` it's a **lifetime budget across
+sessions** — if a saved study already has 8 trials and you pass `n_trials=15`,
+only 7 more run, not 15 more. For `"reuse"` it's ignored entirely (zero new
+trials, whatever's saved is returned as-is). The returned
+`TuningResult.n_trials` always reflects the study's actual total afterward,
+not an echo of the input.
+
+**Caveat — not auto-detected.** If you change `param_ranges`, `lags`, or
+`covariate_series_ids` between sessions while reusing/resuming the *same*
+`study_name`, Optuna will happily keep sampling into what's now an
+incompatible search space — this module doesn't guard against it (a general,
+well-known HPO footgun, not specific to this code). Use `mode="scratch"` (or
+pass a different `study_name`) whenever the search space itself changes.
+
+```python
+from pathlib import Path
+
+db = Path("data/lgbm_tuning/optuna_studies.db")
+
+# First session: build the study from nothing.
+tuned = tune_lightgbm_configs(..., storage_path=db, mode="scratch", n_trials=15)
+
+# A later session: extend it to 30 trials total (only 15 more actually run).
+tuned = tune_lightgbm_configs(..., storage_path=db, mode="resume", n_trials=30)
+
+# A read-only session: just load what's saved, no new trials.
+tuned = tune_lightgbm_configs(..., storage_path=db, mode="reuse")
+```
+
+---
+
+## 8. How to call it
 
 ```python
 from datetime import datetime
@@ -248,7 +302,7 @@ To tune a single variant directly (e.g. only the covariate one), call
 
 ---
 
-## 8. Testing
+## 9. Testing
 
 `aieng-forecasting/tests/aieng/forecasting/methods/numerical/test_lgbm_quantile_tuning.py`
 covers the interpolation math and the `_PerQuantileLightGBMModel` override
@@ -261,7 +315,7 @@ in CI.
 
 ---
 
-## 9. Checklist for adding a new tunable param
+## 10. Checklist for adding a new tunable param
 
 1. Add it to `_DEFAULT_PARAM_RANGES` in `lgbm_quantile_tuning.py` with sensible
    `base`/`slope` bounds.
@@ -273,14 +327,16 @@ in CI.
 
 ---
 
-## 10. Current status / open follow-ups
+## 11. Current status / open follow-ups
 
-- **Not wired into the BAA10Y notebooks yet.** The 5 existing
-  `DartsLightGBMPredictor` call sites across
-  `01_BAA10Y_multivariate_backtest.ipynb` and
-  `02_BAA10Y_backtest_comparison.ipynb` are unaffected. Wiring them up (per
-  §7) is a deliberate, focused follow-up rather than bundled into this
-  change.
+- **Wired into `01_BAA10Y_multivariate_backtest.ipynb`, not yet into
+  `02_BAA10Y_backtest_comparison.ipynb`.** Notebook 01's predictors cell has
+  a tuning cell (`LIGHTGBM_MODE`/`TUNING_TASK_ID`/`LGBM_TUNING_MODE`) using
+  §7's save/resume support. Notebook 02 is a separate, independent
+  predictor-instantiation-and-rerun notebook (not a cache reader — its
+  `run_experiment(...)` defaults `force_refresh=True`), so nothing carries
+  over automatically; wiring it in is a small follow-up now that
+  `mode="reuse"` makes loading an already-tuned config near-free.
 - **`_DEFAULT_PARAM_RANGES` bounds are strawman defaults**, not calibrated
   against real BAA10Y data — expect to retune after a first real run.
 - **The RAG regime-change covariate itself** (extracting a signal from Fed

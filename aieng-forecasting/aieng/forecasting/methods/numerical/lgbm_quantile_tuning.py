@@ -23,9 +23,11 @@ only.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from pathlib import Path
+from typing import Any, Literal, Sequence
 
 import pandas as pd
 from aieng.forecasting.data.service import DataService
@@ -154,7 +156,11 @@ class TuningResult(BaseModel):
         Mean CRPS on the validation window for the winning trial. Lower is
         better.
     n_trials : int
-        Number of Optuna trials run.
+        The underlying Optuna study's actual total trial count
+        (``len(study.trials)``) after this call — equals the input
+        ``n_trials`` for ``mode="scratch"`` (and always when
+        ``storage_path=None``), but may be smaller under ``"resume"``/
+        ``"reuse"`` if fewer trials had accumulated across sessions.
     validation_start, validation_end : datetime
         The trailing validation window's bounds.
     ran_at : datetime
@@ -190,6 +196,9 @@ def tune_lightgbm_quantile_config(
     warmup: int = 0,
     seed: int | None = None,
     cutoff: datetime | None = None,
+    storage_path: str | Path | None = None,
+    study_name: str | None = None,
+    mode: Literal["scratch", "reuse", "resume"] = "scratch",
 ) -> TuningResult:
     """Run one Optuna study tuning per-quantile LightGBM coefficients.
 
@@ -237,7 +246,12 @@ def tune_lightgbm_quantile_config(
         Search-space bounds per tunable param. Defaults to
         :data:`_DEFAULT_PARAM_RANGES`.
     n_trials : int, default=30
-        Number of Optuna trials.
+        For ``mode="scratch"`` (or ``storage_path=None``), the number of
+        Optuna trials to run. For ``mode="resume"``, a *lifetime* budget —
+        only ``n_trials - len(study.trials)`` additional trials run, so
+        raising ``n_trials`` across sessions extends a study rather than
+        restarting it. Ignored (no new trials) for ``mode="reuse"``. See
+        docs/lightgbm-quantile-tuning-guide.md §7.
     n_jobs : int, default=1
         Number of trials to run concurrently (forwarded to
         ``study.optimize``). This workload's real parallelism lives across
@@ -258,21 +272,62 @@ def tune_lightgbm_quantile_config(
         Optuna sampler seed, for reproducible studies.
     cutoff : datetime or None
         See "No-leakage guard" above.
+    storage_path : str, Path, or None, default=None
+        Path to a SQLite file for persisting the Optuna study across process
+        restarts. ``None`` (default) preserves the original behavior exactly
+        — an in-memory-only study, discarded when the process exits.
+    study_name : str or None, default=None
+        Study name within ``storage_path``'s SQLite file (one file can hold
+        many independently-named studies). ``None`` (default) auto-derives
+        ``f"{task.task_id}_{'covariate' if covariate_series_ids else 'univariate'}"``
+        — this is what lets :func:`tune_lightgbm_configs`'s two per-variant
+        calls share one file without colliding; only set this explicitly for
+        non-default naming.
+    mode : {"scratch", "reuse", "resume"}, default="scratch"
+        Only meaningful when ``storage_path`` is set.
+
+        - ``"scratch"``: delete any existing study under ``study_name``
+          (ignored if none exists yet) and run a fresh study for the full
+          ``n_trials``.
+        - ``"reuse"``: load the existing study and run zero new trials.
+          Raises ``ValueError`` if no study exists yet under ``study_name``
+          — this mode's contract is "near-instant," so it fails fast rather
+          than silently falling back to an expensive run.
+        - ``"resume"``: load-or-create the study, then run only as many
+          additional trials as needed to bring its *total* trial count up to
+          ``n_trials``.
+
+        Changing ``param_ranges``/``lags``/``covariate_series_ids`` between
+        sessions while reusing/resuming the same ``study_name`` is **not**
+        detected — see docs/lightgbm-quantile-tuning-guide.md §7.
 
     Returns
     -------
     TuningResult
-        The winning trial's config and score.
+        The winning trial's config and score. ``n_trials`` on the returned
+        object is the study's actual total trial count after this call
+        (``len(study.trials)``), which may differ from the input ``n_trials``
+        under ``"resume"``/``"reuse"``.
 
     Raises
     ------
     ValueError
-        If ``cutoff`` is given and ``validation_end > cutoff``.
+        If ``cutoff`` is given and ``validation_end > cutoff``; if ``mode``
+        is not one of ``"scratch"``/``"reuse"``/``"resume"``; if
+        ``mode != "scratch"`` and ``storage_path`` is ``None``; or if
+        ``mode="reuse"`` and no study exists yet under ``study_name`` at
+        ``storage_path``.
     """
     if cutoff is not None and validation_end > cutoff:
         raise ValueError(
             f"validation_end ({validation_end}) must not be after cutoff ({cutoff}); "
             "tuning must validate only against already-elapsed origins."
+        )
+    if mode not in {"scratch", "reuse", "resume"}:
+        raise ValueError(f"Unknown mode: {mode!r}; expected 'scratch', 'reuse', or 'resume'.")
+    if storage_path is None and mode != "scratch":
+        raise ValueError(
+            f"mode={mode!r} requires storage_path to be set; pass storage_path= or use mode='scratch'."
         )
 
     import optuna  # noqa: PLC0415
@@ -308,8 +363,49 @@ def tune_lightgbm_quantile_config(
             return float("inf")
         return result.mean_score
 
-    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(_objective, n_trials=n_trials, n_jobs=n_jobs)
+    sampler = optuna.samplers.TPESampler(seed=seed)
+
+    if storage_path is None:
+        study = optuna.create_study(direction="minimize", sampler=sampler)
+        study.optimize(_objective, n_trials=n_trials, n_jobs=n_jobs)
+    else:
+        effective_study_name = study_name or (
+            f"{task.task_id}_{'covariate' if covariate_series_ids else 'univariate'}"
+        )
+        path = Path(storage_path)
+        path.parent.mkdir(parents=True, exist_ok=True)  # SQLite does not auto-create directories
+        # .as_posix() avoids a Windows backslash breaking the sqlite:/// URL
+        storage = f"sqlite:///{path.resolve().as_posix()}"
+
+        if mode == "scratch":
+            with contextlib.suppress(KeyError):  # first run under this study_name — nothing to delete
+                optuna.delete_study(study_name=effective_study_name, storage=storage)
+            study = optuna.create_study(
+                storage=storage, study_name=effective_study_name, direction="minimize", sampler=sampler
+            )
+            study.optimize(_objective, n_trials=n_trials, n_jobs=n_jobs)
+        else:
+            # load_if_exists=True creates-if-missing or loads-if-present in one
+            # call; this is what makes resume-with-nothing-saved fall out for
+            # free (an empty study's remaining trial count equals n_trials,
+            # same as scratch) with no separate try/except fallback needed.
+            study = optuna.create_study(
+                storage=storage,
+                study_name=effective_study_name,
+                direction="minimize",
+                sampler=sampler,
+                load_if_exists=True,
+            )
+            if mode == "reuse" and len(study.trials) == 0:
+                raise ValueError(
+                    f"mode='reuse' found no saved trials for study {effective_study_name!r} at "
+                    f"{storage_path!s}. Run mode='scratch' or mode='resume' first."
+                )
+            if mode == "resume":
+                remaining = max(0, n_trials - len(study.trials))
+                if remaining > 0:
+                    study.optimize(_objective, n_trials=remaining, n_jobs=n_jobs)
+            # mode == "reuse" with trials present: zero new trials, fall through.
 
     best_coefficients = {
         name: (study.best_trial.params[f"{name}_base"], study.best_trial.params[f"{name}_slope"])
@@ -321,7 +417,7 @@ def tune_lightgbm_quantile_config(
         coefficients=best_coefficients,
         per_quantile_kwargs=study.best_trial.user_attrs["per_quantile_kwargs"],
         best_score=study.best_value,
-        n_trials=n_trials,
+        n_trials=len(study.trials),
         validation_start=validation_start,
         validation_end=validation_end,
         ran_at=datetime.now(tz=timezone.utc).replace(tzinfo=None),
@@ -347,6 +443,8 @@ def tune_lightgbm_configs(
     param_ranges: dict[str, ParamRange] | None = None,
     seed: int | None = None,
     cutoff: datetime | None = None,
+    storage_path: str | Path | None = None,
+    mode: Literal["scratch", "reuse", "resume"] = "scratch",
 ) -> dict[str, TuningResult]:
     """Tune per-quantile LightGBM config(s) for the univariate + covariate variants.
 
@@ -368,6 +466,15 @@ def tune_lightgbm_configs(
         univariate variant and reuses its ``per_quantile_kwargs`` for the
         covariate variant too — cheaper, at the cost of the covariate
         variant not getting a config suited to its larger feature space.
+    storage_path, mode
+        Forwarded to both underlying calls unchanged — see
+        :func:`tune_lightgbm_quantile_config`'s docstring for the three-mode
+        save/resume behavior. Note ``study_name`` is deliberately **not**
+        exposed here: each underlying call auto-derives its own name from
+        ``task.task_id`` and its variant, which is what keeps the univariate
+        and covariate studies from colliding in the same ``storage_path``
+        file. Callers needing a non-default ``study_name`` should call
+        :func:`tune_lightgbm_quantile_config` directly per variant instead.
     (all other parameters are forwarded to :func:`tune_lightgbm_quantile_config`)
 
     Returns
@@ -393,6 +500,8 @@ def tune_lightgbm_configs(
         "warmup": warmup,
         "seed": seed,
         "cutoff": cutoff,
+        "storage_path": storage_path,
+        "mode": mode,
     }
     univariate_result = tune_lightgbm_quantile_config(covariate_series_ids=None, **shared_kwargs)
     if not separate:
