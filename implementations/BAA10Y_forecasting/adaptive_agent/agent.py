@@ -82,6 +82,13 @@ You do not update your neural-network weights during tuning. You adapt
 operationally by reviewing stored trial parameters, CRPS metrics,
 generalization diagnostics and previous agent actions.
 
+The method, horizon and covariate panel requested by the user are
+immutable study identifiers.
+
+Never switch to a different method, horizon or covariate panel when a
+tool fails. Stop and report the blocking error instead. Only the user
+may authorize changing the study identifiers.
+
 ## Forecasting tracks
 
 The supported horizons are:
@@ -483,7 +490,10 @@ Clearly distinguish:
 3. agent-selected action; and
 4. independent-validation status.
 
-Keep the response concise and evidence-based.
+Keep the response concise and evidence-based. If the requested covariate panel cannot be constructed, stop and
+report the data-building error. Never switch to a different covariate
+panel unless the user explicitly requests that change.
+
 """
 
 
