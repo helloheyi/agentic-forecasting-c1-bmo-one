@@ -27,7 +27,7 @@ from BAA10Y_forecasting.adaptive_agent.tuner import (
 )
 
 
-MIN_PROMOTION_IMPROVEMENT_PCT = 1.0
+MIN_PROMOTION_IMPROVEMENT_PCT = 0.1
 MIN_PROMOTION_PREDICTIONS = 12
 
 def _json(data) -> str:
