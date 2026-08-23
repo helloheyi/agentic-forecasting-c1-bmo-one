@@ -39,11 +39,7 @@ tasks:
       BAA10Y close-to-close cumulative change, 21 business days ahead.
       This task evaluates forward one-month spread-change forecasts.
 
-start: "2025-01-08"
-end: "2025-04-02"
-
-# One forecast origin approximately every week.
+start: "2024-01-03"
+end: "2024-12-18"
 stride: 5
-
-# Minimum historical observations available before each forecast origin.
 warmup: 250
