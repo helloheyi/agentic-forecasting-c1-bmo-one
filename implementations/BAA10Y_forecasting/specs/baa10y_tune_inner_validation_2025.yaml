@@ -44,7 +44,7 @@ tasks:
       BAA10Y close-to-close cumulative change, 21 business days ahead.
       This task evaluates forward one-month spread-change forecasts.
 
-start: "2025-01-22"
-end: "2025-06-25"
+start: "2025-05-07"
+end: "2025-08-06"
 stride: 5
 warmup: 250
