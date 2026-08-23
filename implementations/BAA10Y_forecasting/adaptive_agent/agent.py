@@ -1,13 +1,13 @@
 """Adaptive parameter-tuning agent for BAA10Y forecasting.
 
-The agent coordinates LightGBM parameter tuning but does not execute
+The agent coordinates LightGBM  parameter tuning but does not execute
 forecasting code directly. Numerical experiments run through the
 registered tools in ``skill_tools.py``.
 
 Current automatic-search scope:
 
 * LightGBM
-* Target-only or default-covariate panels
+* Target-only or default-covariate or default-covariate with HYOAS panels
 * 1-, 5-, or 21-business-day horizons
 * Optuna TPE parameter search
 * Paired development and inner-validation backtests

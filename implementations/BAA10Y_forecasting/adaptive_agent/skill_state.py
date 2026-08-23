@@ -21,10 +21,8 @@ TuningMethod = Literal[
 
 TuningExperiment = Literal[
     "smoke",
-    "tune_2025",
     "tune_paired_2025",
     "validate_2025",
-    "backtest_2025",
     "stress_2020",
 ]
 

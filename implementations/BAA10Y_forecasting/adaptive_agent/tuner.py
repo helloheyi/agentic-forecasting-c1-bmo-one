@@ -72,8 +72,7 @@ VALID_METHODS = {
     "llmp_sampled_trajectory",
 }
 
-# HYOAS is not included yet because the current dynamic tuner only
-# builds target-only and default-covariate data services.
+
 VALID_COVARIATE_PANELS = {
     "target_only",
     "default",

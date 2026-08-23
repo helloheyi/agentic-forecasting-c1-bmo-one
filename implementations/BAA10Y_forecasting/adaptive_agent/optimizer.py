@@ -45,9 +45,6 @@ TREE_SHAPES = {
         "num_leaves": 31,
     },
 }
-MAX_TOTAL_TRIALS = 18
-MAX_LLMP_TRIALS = 12
-
 
 MAX_LIGHTGBM_TRIALS = 18
 MAX_LLMP_TRIALS = 12
@@ -1174,12 +1171,14 @@ class BAA10YAdaptiveOptimizer:
             )
 
             robust_candidate = (
-                validation_improvement
+                development_improvement
+                is not None
+                and development_improvement > 0
+                and validation_improvement
                 is not None
                 and validation_improvement > 0
                 and not possible_overfitting
             )
-
 
             diagnostics.append({
                 "trial_number": (
