@@ -48,7 +48,7 @@ import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from hyoas_proxy import (
+from .hyoas_proxy import (
         DGS3_FRED_ID,
         HYOAS_FRED_ID,
         HYG_TICKER,
@@ -338,7 +338,6 @@ DEFAULT_COVARIATE_SERIES_IDS: list[str] = [
     SERIES_ID_CPI_INFLATION_CHANGE,
     SERIES_ID_UNEMPLOYMENT,
     SERIES_ID_OIL_RETURN,
-    SERIES_ID_GOLD_RETURN,
     SERIES_ID_DOLLAR_INDEX_RETURN,
     SERIES_ID_NASDAQ_RETURN,
 
@@ -873,7 +872,6 @@ __all__ = [
     "SERIES_ID_CPI_INFLATION_CHANGE",
     "SERIES_ID_DOLLAR_INDEX_RETURN",
     "SERIES_ID_FED_FUNDS",
-    "SERIES_ID_GOLD_RETURN",
     "SERIES_ID_NASDAQ_RETURN",
     "SERIES_ID_OIL_RETURN",
     "SERIES_ID_UNEMPLOYMENT",
