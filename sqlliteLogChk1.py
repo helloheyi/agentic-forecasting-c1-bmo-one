@@ -34,3 +34,7 @@ for name in ["baa10y_change_5b_univariate", "baa10y_change_5b_covariate"]:
     for t in study.trials:
         dur = (t.datetime_complete - t.datetime_start) if t.datetime_complete else None
         print(f"  trial {t.number}: state={t.state.name}, duration={dur}, value={t.value}")
+
+trialToCheck = 1
+study = optuna.load_study(study_name="baa10y_change_5b_covariate", storage=storage)
+print(study.trials[trialToCheck].params)
