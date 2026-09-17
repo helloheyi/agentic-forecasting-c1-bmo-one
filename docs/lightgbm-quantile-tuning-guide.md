@@ -17,6 +17,14 @@ All of this is implemented in
 > `02_BAA10Y_backtest_comparison.ipynb`. Every pre-existing
 > `DartsLightGBMPredictor` call site elsewhere is unaffected unless it opts
 > in. See §11.
+>
+> **Running this against more than one `EXPERIMENT_CONFIG`?** Read
+> [`lgbm-tuning-scenario-backtest-2025.md`](lgbm-tuning-scenario-backtest-2025.md)
+> and [`lgbm-tuning-scenario-stress-2020.md`](lgbm-tuning-scenario-stress-2020.md)
+> before doing so — each scenario needs its own validation window *and* its own
+> saved-study file. §7's save/resume modes below don't protect you from mixing
+> the two up: the auto-derived study name depends only on `TUNING_TASK_ID` and
+> the covariate flag, not on which scenario you're tuning for.
 
 ---
 

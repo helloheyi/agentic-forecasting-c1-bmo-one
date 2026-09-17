@@ -255,6 +255,10 @@ DEFAULT_CACHE_DIR = _default_cache_dir()
 # resolved against repo ``data/`` (stem filenames like ``gspc_adj_close_1d.parquet`` per ticker).
 DEFAULT_YAHOO_CACHE_DIR = DEFAULT_CACHE_DIR / "yfinance"
 DEFAULT_FRED_CACHE_DIR = DEFAULT_CACHE_DIR / "fred"
+# H.4.1-derived series (RAGtools/, src/baa10y_forecasting/rag/) -- precomputed
+# offline from h41_pdfs/, no live fetch. See build_structured_series.py and
+# build_narrative_series.py.
+DEFAULT_H41_RAG_CACHE_DIR = DEFAULT_CACHE_DIR / "h41_rag"
 
 # Keys are FRED series ids; values are (description, units, pandas frequency hint)
 # for ``scripts/fetch_fred.py`` registration — keep in sync with _fred_frame call sites below.
@@ -328,6 +332,87 @@ HYOAS_OPTIONAL_COVARIATE_SERIES_IDS: list[str] = [
     SERIES_ID_HYOAS_OBSERVED_CHANGE,
     SERIES_ID_HYOAS_PROXY_CHANGE,
 ]
+
+# H.4.1-derived covariates -- see RAGtools/feature_docs/*.md for the design
+# rationale behind each one, and FRBNYLoanCPFF.md for the one planned feature
+# NOT yet built (needs RAG retrieval over footnote text, not table parsing;
+# only the 9 below -- 3 structured + 3 narrative scores x {median, max} --
+# exist as parquet so far).
+SERIES_ID_RESERVE_BALANCES_LEVEL = "reserve_balances_level_l1b"
+SERIES_ID_QT_INTENSITY = "qt_intensity_l1b"
+SERIES_ID_FACILITY_STRESS = "facility_stress_l1b"
+SERIES_ID_CREDIT_STRESS_NARRATIVE_MEDIAN = "credit_stress_narrative_median_l1b"
+SERIES_ID_CREDIT_STRESS_NARRATIVE_MAX = "credit_stress_narrative_max_l1b"
+SERIES_ID_LIQUIDITY_NARRATIVE_MEDIAN = "liquidity_narrative_median_l1b"
+SERIES_ID_LIQUIDITY_NARRATIVE_MAX = "liquidity_narrative_max_l1b"
+SERIES_ID_INTERVENTION_NARRATIVE_MEDIAN = "intervention_narrative_median_l1b"
+SERIES_ID_INTERVENTION_NARRATIVE_MAX = "intervention_narrative_max_l1b"
+
+H41_RAG_OPTIONAL_COVARIATE_SERIES_IDS: list[str] = [
+    SERIES_ID_RESERVE_BALANCES_LEVEL,
+    SERIES_ID_QT_INTENSITY,
+    SERIES_ID_FACILITY_STRESS,
+    SERIES_ID_CREDIT_STRESS_NARRATIVE_MEDIAN,
+    SERIES_ID_CREDIT_STRESS_NARRATIVE_MAX,
+    SERIES_ID_LIQUIDITY_NARRATIVE_MEDIAN,
+    SERIES_ID_LIQUIDITY_NARRATIVE_MAX,
+    SERIES_ID_INTERVENTION_NARRATIVE_MEDIAN,
+    SERIES_ID_INTERVENTION_NARRATIVE_MAX,
+]
+
+# series_id -> (parquet filename stem under DEFAULT_H41_RAG_CACHE_DIR, description, units).
+# All 9 are structurally identical (load parquet, expand weekly->daily, lag) unlike
+# the bespoke per-covariate blocks above -- a small loop over this table is the
+# right amount of abstraction here, not the "it's all just code" bespoke-block
+# pattern, since these genuinely are one shape. Add a row here plus the parquet
+# file to add a new H.4.1-derived covariate.
+H41_RAG_SERIES_SPECS: dict[str, tuple[str, str, str]] = {
+    SERIES_ID_RESERVE_BALANCES_LEVEL: (
+        "ReserveBalancesLevel",
+        "Reserve balances with Federal Reserve Banks (H.4.1 Table 1), lagged 1 business day",
+        "millions-of-dollars",
+    ),
+    SERIES_ID_QT_INTENSITY: (
+        "QTIntensity",
+        "-1 x week-over-week change in Securities Held Outright (H.4.1), lagged 1 business day",
+        "millions-of-dollars",
+    ),
+    SERIES_ID_FACILITY_STRESS: (
+        "FacilityStress",
+        "Sum of non-routine Fed credit-facility usage, exclusion-based (H.4.1), lagged 1 business day",
+        "millions-of-dollars",
+    ),
+    SERIES_ID_CREDIT_STRESS_NARRATIVE_MEDIAN: (
+        "CreditStressNarrativeScore_median",
+        "Median per-chunk credit-stress narrative score across a release's H.4.1 text, lagged 1 business day",
+        "score-0-1",
+    ),
+    SERIES_ID_CREDIT_STRESS_NARRATIVE_MAX: (
+        "CreditStressNarrativeScore_max",
+        "Max per-chunk credit-stress narrative score across a release's H.4.1 text, lagged 1 business day",
+        "score-0-1",
+    ),
+    SERIES_ID_LIQUIDITY_NARRATIVE_MEDIAN: (
+        "LiquidityNarrativeScore_median",
+        "Median per-chunk liquidity-stress narrative score across a release's H.4.1 text, lagged 1 business day",
+        "score-0-1",
+    ),
+    SERIES_ID_LIQUIDITY_NARRATIVE_MAX: (
+        "LiquidityNarrativeScore_max",
+        "Max per-chunk liquidity-stress narrative score across a release's H.4.1 text, lagged 1 business day",
+        "score-0-1",
+    ),
+    SERIES_ID_INTERVENTION_NARRATIVE_MEDIAN: (
+        "InterventionNarrativeScore_median",
+        "Median per-chunk Fed-intervention-announcement narrative score, lagged 1 business day",
+        "score-0-1",
+    ),
+    SERIES_ID_INTERVENTION_NARRATIVE_MAX: (
+        "InterventionNarrativeScore_max",
+        "Max per-chunk Fed-intervention-announcement narrative score, lagged 1 business day",
+        "score-0-1",
+    ),
+}
 
 DEFAULT_COVARIATE_SERIES_IDS: list[str] = [
     SERIES_ID_VIX_LEVEL,
@@ -431,6 +516,38 @@ def _build_monthly_unemployment_feature(
     return _apply_one_business_day_feature_lag(daily)
 
 
+def _build_h41_rag_feature(
+    parquet_stem: str,
+    *,
+    cache_dir: Path,
+    start: str,
+    end: str | None,
+) -> pd.DataFrame:
+    """Load a precomputed H.4.1-derived series and apply the standard leak-safety treatment.
+
+    Built entirely offline from the local ``h41_pdfs/`` corpus (see
+    ``src/baa10y_forecasting/rag/`` and ``RAGtools/feature_docs/``) -- no live
+    fetch, no ``refresh`` flag, just a parquet read. ``timestamp`` in the
+    source parquet is the H.4.1 "week ended" (Wednesday) statement date; the
+    filing's actual release is the next business day (Thursday, ~4:30pm ET,
+    per the release date printed on the filing itself). Unlike CPI/
+    unemployment's *estimated* publication lag, this is the filing's own
+    stated release day, not a conservative proxy.
+    """
+    path = cache_dir / f"{parquet_stem}.parquet"
+    if not path.exists():
+        raise RuntimeError(
+            f"H.4.1-derived series file not found: {path}. Run "
+            "src/baa10y_forecasting/rag/build_structured_series.py and/or "
+            "build_narrative_series.py first."
+        )
+    frame = pd.read_parquet(path)[["timestamp", "value"]].copy()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    frame["released_at"] = frame["timestamp"] + pd.offsets.BDay(1)
+    daily = _business_daily_expand_from_releases(frame, start=start, end=end)
+    return _apply_one_business_day_feature_lag(daily)
+
+
 def _build_daily_fred_level_feature(
     fred_id: str,
     *,
@@ -496,6 +613,7 @@ def build_baa10y_multivariate_service(  # noqa: PLR0912, PLR0915
     end: str | None = None,
     yahoo_cache_dir: Path | None = None,
     fred_cache_dir: Path | None = None,
+    h41_rag_cache_dir: Path | None = None,
 ) -> DataService:
     """Build DataService with BAA10Y target plus optional leak-safe covariates.
 
@@ -535,6 +653,10 @@ def build_baa10y_multivariate_service(  # noqa: PLR0912, PLR0915
     if yahoo_dir is None or fred_dir is None:
         raise RuntimeError("Could not resolve yahoo/fred cache directories.")
     yahoo_dir.mkdir(parents=True, exist_ok=True)
+
+    h41_rag_dir = _as_absolute_cache(h41_rag_cache_dir or DEFAULT_H41_RAG_CACHE_DIR)
+    if h41_rag_dir is None:
+        raise RuntimeError("Could not resolve H.4.1-derived-series cache directory.")
 
     def _handle_covariate_error(series_id: str, exc: Exception) -> None:
         if strict_covariates:
@@ -859,7 +981,27 @@ def build_baa10y_multivariate_service(  # noqa: PLR0912, PLR0915
                 SERIES_ID_HYOAS_PROXY_CHANGE,
                 exc,
             )
-    
+
+    ## H.4.1-derived covariates (RAG-built, offline, no refresh) -- see H41_RAG_SERIES_SPECS
+    for series_id, (parquet_stem, description, units) in H41_RAG_SERIES_SPECS.items():
+        if series_id not in desired_set:
+            continue
+        try:
+            frame = _build_h41_rag_feature(parquet_stem, cache_dir=h41_rag_dir, start=start, end=end)
+            svc.register(
+                series_id,
+                StaticFrameAdapter(frame),
+                SeriesMetadata(
+                    series_id=series_id,
+                    description=description,
+                    source="H.4.1 (Federal Reserve weekly release), RAG-derived",
+                    units=units,
+                    frequency="B",
+                    table_id=f"h41_rag:{parquet_stem}:l1b",
+                ),
+            )
+        except (RuntimeError, ValueError) as exc:
+            _handle_covariate_error(series_id, exc)
 
     return svc
 
@@ -890,4 +1032,16 @@ __all__ = [
     "build_baa10y_multivariate_service",
     "HYOAS_OPTIONAL_COVARIATE_SERIES_IDS",
     "SERIES_ID_HYOAS_OBSERVED_CHANGE",
-    "SERIES_ID_HYOAS_PROXY_CHANGE",]
+    "SERIES_ID_HYOAS_PROXY_CHANGE",
+    "H41_RAG_OPTIONAL_COVARIATE_SERIES_IDS",
+    "H41_RAG_SERIES_SPECS",
+    "SERIES_ID_RESERVE_BALANCES_LEVEL",
+    "SERIES_ID_QT_INTENSITY",
+    "SERIES_ID_FACILITY_STRESS",
+    "SERIES_ID_CREDIT_STRESS_NARRATIVE_MEDIAN",
+    "SERIES_ID_CREDIT_STRESS_NARRATIVE_MAX",
+    "SERIES_ID_LIQUIDITY_NARRATIVE_MEDIAN",
+    "SERIES_ID_LIQUIDITY_NARRATIVE_MAX",
+    "SERIES_ID_INTERVENTION_NARRATIVE_MEDIAN",
+    "SERIES_ID_INTERVENTION_NARRATIVE_MAX",
+]
