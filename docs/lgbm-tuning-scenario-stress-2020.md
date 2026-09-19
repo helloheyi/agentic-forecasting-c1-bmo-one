@@ -32,7 +32,7 @@ matter how tempting that data is. This is a much shorter, older validation
 window than `backtest_2025` gets to use, and that's not a choice — it's forced
 by when this scenario's origins actually are.
 
-## Recommended settings for the first run (not yet executed as of this doc)
+## Recommended settings (current — notebook cells 7 and 16)
 
 ```python
 EXPERIMENT_CONFIG = "stress_2020"
@@ -46,9 +46,11 @@ LGBM_TUNING_DB_STRESS = ROOT / "data" / "lgbm_tuning" / "optuna_studies_stress20
 #   just be a different study_name in the same file (tune_lightgbm_configs
 #   doesn't expose study_name as a parameter at all).
 
-validation_end ≈ datetime(2019, 11, 15)    # close to the original, pre-drift value
+DATA_HISTORY_START = "2007-01-01"          # section 1 -- NOT the old 2016-01-01
+validation_end = datetime(2009, 8, 31)     # back near the post-GFC "new normal"
 cutoff = datetime(2020, 2, 3)              # = stress_2020 spec's start (enforced)
-validation_window ≈ 45-60                  # start smaller than backtest_2025's 120
+validation_window = 281                    # ~2008-08-01 -> 2009-08-31 (business days)
+stride = 4                                 # subsample -- ~71 origins, not ~281
 n_trials ≈ 15-20                           # start smaller than backtest_2025's 67
 n_jobs = 4
 ```
@@ -58,6 +60,52 @@ unverified setup (new storage file, first run), and the guide's own advice
 (§6) is to confirm a pipeline works end-to-end before scaling `n_trials`/
 `validation_window` up. Reuse `CHEAPER_PARAM_RANGES` from the `backtest_2025`
 cell too, unless a first run shows it's unnecessary here.
+
+### Why the window moved into the 2008 GFC (not "close to the original, pre-drift value")
+
+The original plan validated at `2019-11-15` — a calm, pre-COVID window chosen
+to stay close in time to the live `2020-02-03` origins ("pre-drift"). That
+choice quietly worked against this scenario's own stated purpose: with
+`DATA_HISTORY_START` still at `2016-01-01`, every origin's training set —
+tuning *and* live evaluation alike — was expanding-window from 2016, so
+LightGBM never once trained on a genuine stress episode before being scored
+on the COVID crash. A crisis-flag-like feature such as `FacilityStress` or
+`QTIntensity` can look like pure noise to a tree that has only ever seen calm
+data, regardless of how good it might be during an actual regime shift.
+
+Two changes fix this together (both are needed — either alone is a partial
+fix):
+
+- `DATA_HISTORY_START` moved to `2007-01-01` (section 1 of the notebook,
+  shared across all `EXPERIMENT_CONFIG`s). All of the default covariates and
+  the H.4.1-RAG series (`data/h41_rag/*.parquet`) have history back to at
+  least 2000, and `BAA10Y` itself back to 1986, so this is safe. This alone
+  gets 2008 into every origin's *training* set, but tuning would still be
+  picking hyperparameters based on calm-period validation CRPS.
+- `validation_end`/`validation_window` moved to cover `2008-08-01` ->
+  `2009-08-31`. The first attempt at this tried to bracket just the acute
+  spike with 15 calm days on each side (`validation_end = 2008-12-31`,
+  `validation_window = 65`) — but per `data/fred/BAA10Y.parquet` there's no
+  genuine calm that close to the spike: spreads were already at ~3.2 in
+  August 2008 (Bear Stearns had markets jittery since March), the spread
+  widens from ~2.9 in September to a peak of 6.16 on 2008-12-04, and stays at
+  5.0-5.9 through Q1 2009 — real calm doesn't return until ~August 2009
+  (~2.9-3.0, a "new normal" still above 2007's ~1.6-2.1 baseline), about 8
+  months after the peak. `BacktestSpec` validation windows are a single
+  contiguous trailing range (`start = validation_end − window`, no gaps), so
+  reaching genuine calm on both sides means the window has to span the whole
+  year, not just the acute core. `stride = 4` keeps the actual number of
+  walk-forward retrains (~71 origins) comparable to what the tighter 65-day
+  window would have cost, while covering onset → peak → recovery instead of
+  only the acute middle. `tune_lightgbm_configs`/`tune_lightgbm_quantile_config`
+  both already accept `stride` — it just wasn't threaded through this
+  notebook's tuning cell before.
+
+`cutoff` stays at `2020-02-03`: it's what the no-leakage guard checks against
+(`validation_end` must not exceed it), and with `validation_end` now in 2009
+it's no longer the binding constraint, but it's still correct to keep passing
+it — see the next section for what happens if a scenario's tuning cell
+doesn't enforce this.
 
 ## The collision this file exists to prevent
 
