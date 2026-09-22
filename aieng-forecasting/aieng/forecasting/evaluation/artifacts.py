@@ -187,6 +187,8 @@ def cached_backtest(
     data_service: DataService,
     store_dir: Path | None = None,
     force_refresh: bool = False,
+    *,
+    n_jobs: int = 1,
 ) -> BacktestResult:
     """Run :func:`backtest` with a load-or-compute cache.
 
@@ -208,6 +210,9 @@ def cached_backtest(
         Store root.  Defaults to :data:`DEFAULT_STORE_DIR`.
     force_refresh : bool
         When ``True`` always recompute even if a cached file exists.
+    n_jobs : int, default=1
+        Forwarded to :func:`backtest` — number of origins to evaluate
+        concurrently. ``1`` preserves historical sequential behaviour.
 
     Returns
     -------
@@ -218,7 +223,7 @@ def cached_backtest(
         cached = load_backtest_result(spec_id, predictor.predictor_id, store_dir=store_dir)
         if cached is not None:
             return cached
-    result = backtest(predictor=predictor, spec=spec, data_service=data_service)
+    result = backtest(predictor=predictor, spec=spec, data_service=data_service, n_jobs=n_jobs)
     save_backtest_result(result, spec_id=spec_id, store_dir=store_dir)
     return result
 
@@ -303,6 +308,8 @@ def cached_multi_backtest(
     force_refresh: bool = False,
     max_retries: int = 2,
     retry_delay: float = 2.0,
+    *,
+    n_jobs: int = 1,
 ) -> dict[str, BacktestResult]:
     """Run :func:`multi_backtest` with a per-task load-or-compute cache.
 
@@ -335,6 +342,12 @@ def cached_multi_backtest(
         Number of retry attempts per failing origin.
     retry_delay : float, default=2.0
         Seconds to wait between per-origin retry attempts.
+    n_jobs : int, default=1
+        Forwarded to :func:`~aieng.forecasting.evaluation.backtest.backtest`
+        for each (non-cached) task — number of origins to evaluate
+        concurrently. ``1`` preserves historical sequential behaviour. Applies
+        only to tasks actually computed this call; a task already satisfied
+        from cache is returned as-is regardless of this value.
 
     Returns
     -------
@@ -357,6 +370,7 @@ def cached_multi_backtest(
                 data_service=data_service,
                 max_retries=max_retries,
                 retry_delay=retry_delay,
+                n_jobs=n_jobs,
             )
         except Exception as exc:
             _log.warning(

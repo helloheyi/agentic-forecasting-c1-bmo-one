@@ -8,9 +8,11 @@ evaluation window parameters.
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -496,6 +498,76 @@ def _resolve(task: ForecastingTask, forecast_date: datetime, data_service: DataS
     return float(match["value"].iloc[0])
 
 
+def _run_origin(
+    origin: datetime,
+    *,
+    predictor: Predictor,
+    task: ForecastingTask,
+    warmup: int,
+    data_service: DataService,
+    max_retries: int,
+    retry_delay: float,
+) -> tuple[list[Prediction], list[float], bool]:
+    """Predict + score a single origin. Returns ``(predictions, scores, skipped)``.
+
+    Factored out of :func:`run_eval_loop` so the per-origin work can be
+    dispatched either in a plain sequential loop (``n_jobs=1``, the historical
+    behaviour, zero pool overhead) or across a thread pool (``n_jobs>1``) with
+    identical logic either way — this function is the single source of truth
+    for what "one origin" means, so the two dispatch paths can't drift apart.
+    """
+    ctx = data_service.context(as_of=origin)
+
+    if warmup > 0:
+        series = ctx.get_series(task.target_series_id)
+        if len(series) < warmup:
+            return [], [], True
+
+    origin_predictions: list[Prediction] = []
+    last_exc: BaseException | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            origin_predictions = predictor.predict(task, ctx)
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                logger.warning(
+                    "predict() failed at origin %s (attempt %d/%d): %s — retrying in %.0fs",
+                    origin.date(),
+                    attempt + 1,
+                    max_retries + 1,
+                    exc,
+                    retry_delay,
+                )
+                time.sleep(retry_delay)
+
+    if last_exc is not None:
+        logger.warning(
+            "predict() failed at origin %s after %d attempt(s) — skipping origin: %s",
+            origin.date(),
+            max_retries + 1,
+            last_exc,
+        )
+        return [], [], True
+
+    predictions: list[Prediction] = []
+    scores: list[float] = []
+    for pred in origin_predictions:
+        actual = _resolve(task, pred.forecast_date, data_service)
+        if actual is None:
+            continue
+        score = _score_for_prediction(task, pred, actual)
+        predictions.append(pred)
+        scores.append(score)
+
+    if not predictions:
+        return [], [], True
+
+    return predictions, scores, False
+
+
 def run_eval_loop(
     predictor: Predictor,
     task: ForecastingTask,
@@ -504,6 +576,8 @@ def run_eval_loop(
     data_service: DataService,
     max_retries: int = 2,
     retry_delay: float = 2.0,
+    *,
+    n_jobs: int = 1,
 ) -> tuple[list[Prediction], list[float], int]:
     """Core evaluation loop shared by ``backtest()`` and ``evaluate()``.
 
@@ -530,6 +604,21 @@ def run_eval_loop(
         structured output) without crashing the whole backtest.
     retry_delay : float, default=2.0
         Seconds to wait between retry attempts.
+    n_jobs : int, default=1
+        Number of origins to run concurrently via a :class:`ThreadPoolExecutor`.
+        ``1`` (the default) preserves the exact historical behaviour — a plain
+        sequential loop, no pool created at all. Each origin's ``predict()``
+        call fits/predicts independently against its own cutoff-scoped
+        context, so this is embarrassingly parallel; results are gathered via
+        ``Executor.map``, which preserves origin order in the returned lists
+        regardless of which origin's job finishes first. Threads, not
+        processes: this avoids requiring ``predictor``/``data_service`` to be
+        picklable (arbitrary :class:`Predictor` implementations may hold
+        unpicklable state, e.g. network clients for LLM-Process predictors),
+        and CPU-bound native-code fits (e.g. LightGBM) release the GIL during
+        their C++ work, so threads still parallelize the compute that matters.
+        See ``docs/backtest-parallelism.md`` for the full rationale, including
+        why this is origin-level and not quantile- or task-level parallelism.
 
     Returns
     -------
@@ -546,57 +635,28 @@ def run_eval_loop(
     scores: list[float] = []
     skipped = 0
 
-    for origin in origins:
-        ctx = data_service.context(as_of=origin)
+    worker = functools.partial(
+        _run_origin,
+        predictor=predictor,
+        task=task,
+        warmup=warmup,
+        data_service=data_service,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+    )
 
-        if warmup > 0:
-            series = ctx.get_series(task.target_series_id)
-            if len(series) < warmup:
-                skipped += 1
-                continue
+    if n_jobs == 1:
+        results = [worker(origin) for origin in origins]
+    else:
+        with ThreadPoolExecutor(max_workers=n_jobs) as pool:
+            results = list(pool.map(worker, origins))
 
-        origin_predictions: list[Prediction] = []
-        last_exc: BaseException | None = None
-        for attempt in range(max_retries + 1):
-            try:
-                origin_predictions = predictor.predict(task, ctx)
-                last_exc = None
-                break
-            except Exception as exc:
-                last_exc = exc
-                if attempt < max_retries:
-                    logger.warning(
-                        "predict() failed at origin %s (attempt %d/%d): %s — retrying in %.0fs",
-                        origin.date(),
-                        attempt + 1,
-                        max_retries + 1,
-                        exc,
-                        retry_delay,
-                    )
-                    time.sleep(retry_delay)
-
-        if last_exc is not None:
-            logger.warning(
-                "predict() failed at origin %s after %d attempt(s) — skipping origin: %s",
-                origin.date(),
-                max_retries + 1,
-                last_exc,
-            )
+    for origin_predictions, origin_scores, was_skipped in results:
+        if was_skipped:
             skipped += 1
-            continue
-
-        origin_scored = 0
-        for pred in origin_predictions:
-            actual = _resolve(task, pred.forecast_date, data_service)
-            if actual is None:
-                continue
-            score = _score_for_prediction(task, pred, actual)
-            predictions.append(pred)
-            scores.append(score)
-            origin_scored += 1
-
-        if origin_scored == 0:
-            skipped += 1
+        else:
+            predictions.extend(origin_predictions)
+            scores.extend(origin_scores)
 
     if not predictions:
         raise ValueError(
@@ -614,6 +674,8 @@ def backtest(
     data_service: DataService,
     max_retries: int = 2,
     retry_delay: float = 2.0,
+    *,
+    n_jobs: int = 1,
 ) -> BacktestResult:
     """Run a backtest of a predictor against a BacktestSpec.
 
@@ -640,6 +702,9 @@ def backtest(
         failing origin before it is counted as skipped.
     retry_delay : float, default=2.0
         Seconds to wait between retry attempts.
+    n_jobs : int, default=1
+        Forwarded to :func:`run_eval_loop` — number of origins to evaluate
+        concurrently. ``1`` preserves historical sequential behaviour.
 
     Returns
     -------
@@ -666,6 +731,7 @@ def backtest(
         data_service=data_service,
         max_retries=max_retries,
         retry_delay=retry_delay,
+        n_jobs=n_jobs,
     )
     return BacktestResult(
         spec=spec,
@@ -782,7 +848,7 @@ class MultiTargetBacktestSpec(BaseModel):
 
 
 def multi_backtest(
-    predictor: Predictor, spec: MultiTargetBacktestSpec, data_service: DataService
+    predictor: Predictor, spec: MultiTargetBacktestSpec, data_service: DataService, *, n_jobs: int = 1
 ) -> dict[str, BacktestResult]:
     """Run a backtest of a predictor across all tasks in a MultiTargetBacktestSpec.
 
@@ -798,6 +864,15 @@ def multi_backtest(
         Defines the tasks, shared evaluation window, stride, and warmup.
     data_service : DataService
         Pre-populated data service.  Must have all target series registered.
+    n_jobs : int, default=1
+        Forwarded to :func:`backtest` (and from there to :func:`run_eval_loop`)
+        for each task — origins within a task run concurrently across
+        ``n_jobs`` threads. The per-task loop below stays sequential: with
+        typically only 2-3 tasks but tens to hundreds of origins per task,
+        origin-level parallelism alone already has far more independent work
+        than most machines have cores, so also parallelizing across tasks
+        would add complexity without unlocking additional real speedup — see
+        ``docs/backtest-parallelism.md``.
 
     Returns
     -------
@@ -817,4 +892,7 @@ def multi_backtest(
     >>> for task_id, result in results.items():
     ...     print(f"{task_id}: {result.mean_score:.4f}")
     """
-    return {single_spec.task.task_id: backtest(predictor, single_spec, data_service) for single_spec in spec.specs()}
+    return {
+        single_spec.task.task_id: backtest(predictor, single_spec, data_service, n_jobs=n_jobs)
+        for single_spec in spec.specs()
+    }

@@ -381,6 +381,8 @@ def evaluate(
     spec: EvalSpec,
     data_service: DataService,
     tracker: EvalTracker | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> EvalResult:
     """Run an evaluation of a predictor against a protected :class:`EvalSpec`.
 
@@ -407,6 +409,10 @@ def evaluate(
     tracker : EvalTracker or None
         Optional tracker for budget enforcement and run-count provenance.
         If ``None``, the run proceeds unconditionally and ``run_number`` is 1.
+    n_jobs : int, default=1
+        Forwarded to :func:`~aieng.forecasting.evaluation.backtest.run_eval_loop`
+        — number of origins to evaluate concurrently. ``1`` preserves
+        historical sequential behaviour.
 
     Returns
     -------
@@ -446,6 +452,7 @@ def evaluate(
         origins=spec.origins(),
         warmup=spec.warmup,
         data_service=data_service,
+        n_jobs=n_jobs,
     )
 
     if tracker is not None:
@@ -578,6 +585,8 @@ def multi_evaluate(
     spec: MultiTargetEvalSpec,
     data_service: DataService,
     tracker: EvalTracker | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> dict[str, EvalResult]:
     """Run an evaluation of a predictor across all tasks in a MultiTargetEvalSpec.
 
@@ -599,6 +608,13 @@ def multi_evaluate(
     tracker : EvalTracker or None
         Optional tracker for budget enforcement and run-count provenance.
         If ``None``, runs unconditionally and ``run_number`` is 1 on all results.
+    n_jobs : int, default=1
+        Forwarded to :func:`~aieng.forecasting.evaluation.backtest.run_eval_loop`
+        for each task — origins within a task run concurrently across
+        ``n_jobs`` threads. ``1`` preserves historical sequential behaviour.
+        The per-task loop below stays sequential (same reasoning as
+        :func:`~aieng.forecasting.evaluation.backtest.multi_backtest` — see
+        ``docs/backtest-parallelism.md``).
 
     Returns
     -------
@@ -641,6 +657,7 @@ def multi_evaluate(
             origins=_compute_origins(spec.start, spec.end, task.frequency, spec.stride),
             warmup=spec.warmup,
             data_service=data_service,
+            n_jobs=n_jobs,
         )
         task_eval_spec = EvalSpec(
             spec_id=spec.spec_id,

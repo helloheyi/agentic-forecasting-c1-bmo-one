@@ -295,6 +295,16 @@ class AdkTextRunner:
         content = genai_types.Content(role="user", parts=[genai_types.Part(text=prompt)])
 
         async def drain_run() -> str:
+            # BUG(pre-existing): `final_text` is only bound inside the `if` below, so a
+            # stream with no matching event (empty stream, or a final event with no
+            # content/parts) leaves it unassigned and `return final_text or ""` raises
+            # UnboundLocalError instead of returning "". Reproduced by
+            # TestResponseExtraction::test_returns_empty_string_when_stream_has_no_final_event
+            # and ::test_returns_empty_string_when_final_event_has_no_content in
+            # tests/aieng/forecasting/methods/agentic/test_adk_runner.py. Found while
+            # verifying an unrelated change (backtest/eval origin-level parallelism —
+            # see docs/backtest-parallelism.md); left unfixed here since it's pre-existing
+            # and out of scope for that work, not introduced or touched by it.
             async for event in self._runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
