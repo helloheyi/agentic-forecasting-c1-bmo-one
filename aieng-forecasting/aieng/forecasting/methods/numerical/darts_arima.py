@@ -34,6 +34,7 @@ from aieng.forecasting.data.context import ForecastContext
 from aieng.forecasting.evaluation.prediction import STANDARD_QUANTILES, ContinuousForecast, Prediction
 from aieng.forecasting.evaluation.predictor import Predictor
 from aieng.forecasting.evaluation.task import ForecastingTask
+from aieng.forecasting.methods.numerical._darts_construction_lock import DARTS_MODEL_CONSTRUCTION_LOCK
 
 
 class DartsAutoARIMAPredictor(Predictor):
@@ -100,7 +101,8 @@ class DartsAutoARIMAPredictor(Predictor):
             freq=task.frequency,
         )
 
-        model = AutoARIMA()
+        with DARTS_MODEL_CONSTRUCTION_LOCK:
+            model = AutoARIMA()
         model.fit(ts)
 
         # Fit once to max horizon; extract samples at each requested step.

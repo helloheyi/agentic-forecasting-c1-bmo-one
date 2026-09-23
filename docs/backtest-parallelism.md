@@ -68,6 +68,13 @@ and we rejected it:
   every worker process at pool creation — a real, avoidable cost that threads
   don't pay.
 
+> **Correction, added after this went live:** the GIL-release argument above
+> is true but incomplete — it covers LightGBM's *C++ tree-building*, not
+> Darts' own Python-level model construction, which turned out to have a real
+> thread-safety bug of its own. See "A real bug this parallelism change
+> introduced" below. Threads were still the right call; the fix is a small
+> lock around model construction, not a reason to switch to processes.
+
 ## Why origin-level, not quantile-level (the 13 per-quantile fits)
 
 Each origin's `predict()` call fits 13 independent LightGBM boosters
@@ -182,6 +189,90 @@ here would risk the same problem on a different machine.
   (`max_retries`) still works correctly when dispatched through the thread
   pool (a flaky predictor that fails once then succeeds was retried and
   scored correctly for every origin, under `n_jobs=4`).
+- **Gap in the above, found afterward:** that standalone check used a
+  synthetic `ConstantPredictor`/`FlakyPredictor` — it verified
+  `run_eval_loop`'s own dispatch/retry/ordering logic correctly, but never
+  actually constructed a real Darts model under concurrency, which is exactly
+  where the bug in the next section lives. Confirming a framework is correct
+  is not the same as confirming every predictor built on top of it is safe
+  under the concurrency the framework now allows.
+
+## A real bug this parallelism change introduced (found and fixed)
+
+Origin-level parallelism (`ORIGIN_N_JOBS>1`) surfaced a genuine race
+condition in Darts itself, seen as intermittent failures like:
+
+```
+predict() failed at origin 2020-03-20 (attempt 1/3): 'ExponentialSmoothing' object has no attribute '_model_call' — retrying in 2s
+predict() failed at origin 2020-02-19 (attempt 1/3): 'KalmanForecaster' object has no attribute '_model_call' — retrying in 2s
+```
+
+**Root cause:** every Darts forecasting model is built with a `ModelMeta`
+metaclass (`darts/models/forecasting/forecasting_model.py`) that stashes
+constructor arguments on the **class** (not the instance) as a hand-off from
+`__call__` to `__init__`:
+
+```python
+# ModelMeta.__call__
+cls._model_call = all_params
+return super().__call__(**all_params)
+
+# ForecastingModel.__init__ (elsewhere)
+model_params = copy.deepcopy(self._model_call)
+del self.__class__._model_call
+```
+
+This is not thread-safe. If two threads both call, say, `ExponentialSmoothing(...)`
+at nearly the same moment — exactly what origin-level parallelism does, since
+`DartsExponentialSmoothingPredictor.predict()`/`DartsKalmanForecasterPredictor.predict()`
+construct a fresh model on every origin, and ETS/Kalman fits are fast enough
+("well under a second," per their own docstrings) that many origins'
+constructions land in the same tiny window — one thread's `__init__` can find
+`_model_call` already deleted by the other thread's `__init__`, raising
+`AttributeError`. Every Darts model shares this same metaclass (including
+`LightGBMModel`), so the race isn't specific to ETS/Kalman; they just hit it
+far more often because their whole fit is so fast that many origins' worth of
+construction calls pile up in a short window, unlike LightGBM where each
+construction is comparatively rare relative to its own fit time. The race is
+also not confined to one predictor's own origin loop: `lightgbm` and
+`lightgbm_cov` both build plain `LightGBMModel` (only the *tuned* variant
+uses the separate per-quantile subclass), so Section 5's predictor-level
+parallelism running both at once could race them against each other too — a
+lock scoped to a single file/predictor would not have caught that case.
+
+**Why this wasn't caught by the "Verification" section above:** that
+verification exercised `run_eval_loop`'s own logic with a synthetic
+predictor, not real Darts model construction under concurrency — see the new
+bullet added there.
+
+**In this notebook's specific usage, low risk of silent corruption:** each
+predictor is constructed with the same arguments on every origin (e.g.
+`KalmanForecaster(dim_x=self._dim_x)` — `dim_x` doesn't vary by origin), so
+even a cross-thread parameter mix-up would swap identical dicts. The
+observable symptom here was crashes (caught by `run_eval_loop`'s existing
+retry logic, not silent wrong results) — but that's a property of how this
+notebook happens to call these predictors, not a guarantee the underlying
+race is harmless in general.
+
+**Fix:** a single shared `threading.Lock()`
+(`aieng/forecasting/methods/numerical/_darts_construction_lock.py`,
+`DARTS_MODEL_CONSTRUCTION_LOCK`), imported by every predictor wrapper that
+constructs a Darts model (`darts_classical.py`, `darts_arima.py`,
+`darts_regression.py`), wrapped around just the constructor call — not
+`.fit()`/`.predict()`. This serializes only the brief, buggy hand-off window;
+the actual fit/predict computation, where origin-level and predictor-level
+parallelism's real benefit lives, still runs fully concurrently. One shared
+lock (not one per file) is required specifically because of the
+cross-predictor case above (`lightgbm` vs. `lightgbm_cov` both building
+`LightGBMModel`) — three independent locks would not protect against two
+different files' predictors racing on the same underlying Darts class.
+
+**Verification:** reproduced the race directly — 400 concurrent
+`ExponentialSmoothing(...)` constructions across 16 threads, no lock: 5
+failures with the exact `AttributeError` above. Same test with
+`DARTS_MODEL_CONSTRUCTION_LOCK` held during construction: 0 failures across
+400 calls. Full `aieng-forecasting/tests/aieng/forecasting/methods/numerical`
+suite (28 tests) still passes.
 
 ## A pre-existing, unrelated bug found (and deliberately not fixed) while verifying this
 

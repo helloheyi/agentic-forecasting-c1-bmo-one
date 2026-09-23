@@ -44,6 +44,7 @@ from aieng.forecasting.data.context import ForecastContext
 from aieng.forecasting.evaluation.prediction import STANDARD_QUANTILES, ContinuousForecast, Prediction
 from aieng.forecasting.evaluation.predictor import Predictor
 from aieng.forecasting.evaluation.task import ForecastingTask
+from aieng.forecasting.methods.numerical._darts_construction_lock import DARTS_MODEL_CONSTRUCTION_LOCK
 
 
 def _target_timeseries(task: ForecastingTask, context: ForecastContext) -> Any:
@@ -140,15 +141,16 @@ class DartsExponentialSmoothingPredictor(Predictor):
 
         ts = _target_timeseries(task, context)
 
-        if self._seasonal_periods is not None:
-            model = ExponentialSmoothing(
-                trend=ModelMode.ADDITIVE,
-                seasonal=SeasonalityMode.ADDITIVE,
-                seasonal_periods=self._seasonal_periods,
-            )
-        else:
-            # Non-seasonal, non-trend: robust simple exponential smoothing.
-            model = ExponentialSmoothing(trend=ModelMode.NONE, seasonal=SeasonalityMode.NONE)
+        with DARTS_MODEL_CONSTRUCTION_LOCK:
+            if self._seasonal_periods is not None:
+                model = ExponentialSmoothing(
+                    trend=ModelMode.ADDITIVE,
+                    seasonal=SeasonalityMode.ADDITIVE,
+                    seasonal_periods=self._seasonal_periods,
+                )
+            else:
+                # Non-seasonal, non-trend: robust simple exponential smoothing.
+                model = ExponentialSmoothing(trend=ModelMode.NONE, seasonal=SeasonalityMode.NONE)
 
         model.fit(ts)
         forecast_ts = model.predict(n=task.horizon, num_samples=self._num_samples)
@@ -193,7 +195,8 @@ class DartsKalmanForecasterPredictor(Predictor):
         from darts.models import KalmanForecaster  # noqa: PLC0415  # type: ignore[import-untyped]
 
         ts = _target_timeseries(task, context)
-        model = KalmanForecaster(dim_x=self._dim_x)
+        with DARTS_MODEL_CONSTRUCTION_LOCK:
+            model = KalmanForecaster(dim_x=self._dim_x)
         model.fit(ts)
         forecast_ts = model.predict(n=task.horizon, num_samples=self._num_samples)
         return _predictions_from_samples(

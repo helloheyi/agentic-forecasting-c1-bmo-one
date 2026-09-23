@@ -71,6 +71,7 @@ from aieng.forecasting.data.context import ForecastContext
 from aieng.forecasting.evaluation.prediction import STANDARD_QUANTILES, ContinuousForecast, Prediction
 from aieng.forecasting.evaluation.predictor import Predictor
 from aieng.forecasting.evaluation.task import ForecastingTask
+from aieng.forecasting.methods.numerical._darts_construction_lock import DARTS_MODEL_CONSTRUCTION_LOCK
 
 
 # Quantile levels Darts fits internally.  A denser grid than STANDARD_QUANTILES
@@ -332,13 +333,14 @@ class DartsLinearRegressionPredictor(Predictor):
         """Probabilistic linear-regression forecasts for each task horizon."""
         from darts.models import LinearRegressionModel  # noqa: PLC0415
 
-        model = LinearRegressionModel(
-            lags=self._lags,
-            lags_past_covariates=(self._lags_past_covariates if self._covariate_series_ids else None),
-            output_chunk_length=task.horizon,
-            likelihood="quantile",
-            quantiles=_TRAINING_QUANTILES,
-        )
+        with DARTS_MODEL_CONSTRUCTION_LOCK:
+            model = LinearRegressionModel(
+                lags=self._lags,
+                lags_past_covariates=(self._lags_past_covariates if self._covariate_series_ids else None),
+                output_chunk_length=task.horizon,
+                likelihood="quantile",
+                quantiles=_TRAINING_QUANTILES,
+            )
 
         samples_by_horizon = _fit_and_sample(
             model=model,
@@ -441,15 +443,16 @@ class DartsLightGBMPredictor(Predictor):
             model_cls = LightGBMModel
             extra_kwargs = {}
 
-        model = model_cls(
-            lags=self._lags,
-            lags_past_covariates=(self._lags_past_covariates if self._covariate_series_ids else None),
-            output_chunk_length=task.horizon,
-            likelihood="quantile",
-            quantiles=_TRAINING_QUANTILES,
-            **self._lgbm_kwargs,
-            **extra_kwargs,
-        )
+        with DARTS_MODEL_CONSTRUCTION_LOCK:
+            model = model_cls(
+                lags=self._lags,
+                lags_past_covariates=(self._lags_past_covariates if self._covariate_series_ids else None),
+                output_chunk_length=task.horizon,
+                likelihood="quantile",
+                quantiles=_TRAINING_QUANTILES,
+                **self._lgbm_kwargs,
+                **extra_kwargs,
+            )
 
         samples_by_horizon = _fit_and_sample(
             model=model,
